@@ -1,0 +1,1743 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Broadcast Studio Simulator - SMK Budi Luhur</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Import Map untuk mendefinisikan lokasi modul Three.js r128 -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.128.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0f172a; font-family: 'Inter', sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        /* UI Layer */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: flex; flex-direction: column; justify-content: space-between; }
+        .pointer-events-auto { pointer-events: auto; }
+        
+        /* Non-blocking Panel Container */
+        #inspector-container { pointer-events: none; }
+        #inspector-panel { pointer-events: auto; }
+
+        /* Custom Scrollbar */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
+
+        /* Loading Screen */
+        #loading { position: absolute; top:0; left:0; width: 100%; height: 100%; background: #0f172a; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 50; transition: opacity 0.5s ease; }
+        .spinner { border: 4px solid rgba(255,255,255,0.1); width: 40px; height: 40px; border-radius: 50%; border-left-color: #06b6d4; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading">
+        <div class="spinner mb-4"></div>
+        <h2 class="text-xl font-bold tracking-wider">MEMUAT STUDIO VIRTUAL...</h2>
+        <p class="text-gray-400 mt-2 text-sm">Menyiapkan model visual, engine simulasi, dan kontrol operasional</p>
+    </div>
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- UI Layer -->
+    <div id="ui-layer" class="p-4">
+        <!-- Header & Zona Navigasi -->
+        <div class="flex flex-wrap justify-between items-start gap-3 pointer-events-auto">
+            <div class="bg-slate-900/85 backdrop-blur border border-slate-700 p-3.5 rounded-lg shadow-2xl flex items-center gap-4">
+                <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-red-500 to-cyan-500 flex items-center justify-center font-bold text-white shadow-lg text-lg">
+                    TV
+                </div>
+                <div>
+                    <h1 class="text-white font-bold text-base tracking-wide flex items-center gap-2">
+                        <span id="on-air-badge" class="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse inline-block"></span>
+                        VIRTUAL BROADCAST STUDIO
+                    </h1>
+                    <p class="text-cyan-400 text-xs font-semibold flex items-center">
+                        SMK BUDI LUHUR — LAB SIMULATOR INTERAKTIF
+                        </p>
+                    <p class="text-cyan-400 text-xs font-semibold flex items-center">
+                    <span class="text-slate-400">By : Ferdiyudiman, S.Kom, M.Kom</span>
+                    </p>
+                </div>
+            </div>
+            
+            <!-- Zone Navigation Buttons & Patchbay Trigger -->
+            <div class="bg-slate-900/85 backdrop-blur border border-slate-700 p-2 rounded-lg shadow-2xl flex flex-wrap gap-1.5 items-center">
+                <button onclick="flyToZone('studio')" class="px-3 py-1.5 bg-slate-800 hover:bg-cyan-700 text-white text-xs font-semibold rounded transition">STUDIO FLOOR</button>
+                <button onclick="flyToZone('pcr')" class="px-3 py-1.5 bg-slate-800 hover:bg-cyan-700 text-white text-xs font-semibold rounded transition">CONTROL ROOM</button>
+                <button onclick="flyToZone('lighting')" class="px-3 py-1.5 bg-slate-800 hover:bg-cyan-700 text-white text-xs font-semibold rounded transition">LIGHTING GRID</button>
+                <button onclick="resetCamera()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-semibold rounded transition border-l border-slate-600 mr-2">RESET VIEW</button>
+                
+                <button id="btn-show-guide" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded transition border border-slate-600">
+                    📖 PANDUAN
+                </button>
+                <button id="btn-show-patchbay" class="px-3 py-1.5 bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold rounded transition ml-1 flex items-center gap-1 shadow">
+                    <span>🔌</span> PATCHBAY ROUTING
+                </button>
+            </div>
+        </div>
+
+        <!-- Middle Area (Hover Tooltip & On-Air HUD) -->
+        <div class="flex-1 flex flex-col justify-between pointer-events-none relative my-2">
+            <!-- Tooltip Hover -->
+            <div id="hover-tooltip" class="hidden absolute bg-black/90 text-white px-3 py-1.5 rounded border border-cyan-500 text-xs font-semibold shadow-2xl pointer-events-none transition-all z-20">
+                Nama Alat
+            </div>
+
+            <div class="flex-1"></div>
+
+            <!-- On-Air HUD Mini Bar Bawah Kiri -->
+            <div class="pointer-events-auto self-start bg-slate-900/90 backdrop-blur border border-slate-700 rounded-lg p-2.5 px-4 shadow-2xl flex items-center gap-4 text-xs">
+                <div>
+                    <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">PGM ON-AIR</span>
+                    <span id="hud-pgm-name" class="font-extrabold text-red-500 tracking-wide">CAM 1</span>
+                </div>
+                <div class="w-px h-6 bg-slate-700"></div>
+                <div>
+                    <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">PVW PRESET</span>
+                    <span id="hud-pvw-name" class="font-extrabold text-emerald-400 tracking-wide">CAM 2</span>
+                </div>
+                <div class="w-px h-6 bg-slate-700"></div>
+                <div>
+                    <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">AUDIO MASTER</span>
+                    <span id="hud-audio-level" class="font-mono text-cyan-400 font-bold">0.0 dB</span>
+                </div>
+                <div class="w-px h-6 bg-slate-700"></div>
+                <div class="text-[11px] text-slate-400">
+                    💡 Klik objek di 3D untuk mengoperasikannya
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Right Area (Interactive Inspector Panel) -->
+        <div id="inspector-container" class="flex justify-end">
+            <div id="inspector-panel" class="hidden w-[420px] max-w-[95vw] bg-slate-900/95 backdrop-blur border border-slate-700 rounded-xl shadow-2xl overflow-hidden flex-col h-[70vh] max-h-[620px] transition-all">
+                <!-- Panel Header -->
+                <div class="bg-slate-800/90 p-3.5 border-b border-slate-700 flex justify-between items-center">
+                    <div>
+                        <span id="ins-category-tag" class="text-[10px] uppercase font-bold tracking-widest text-cyan-400 block">KATEGORI</span>
+                        <h2 id="ins-title" class="text-white font-bold text-sm tracking-wide mt-0.5 uppercase">NAMA PERANGKAT</h2>
+                    </div>
+                    <button onclick="closeInspector()" class="text-slate-400 hover:text-white transition w-7 h-7 flex items-center justify-center rounded-md hover:bg-slate-700 text-sm">✕</button>
+                </div>
+
+                <!-- Tab Navigation Buttons -->
+                <div class="flex bg-slate-950/80 border-b border-slate-800 text-xs font-semibold">
+                    <button onclick="switchTab('operational')" id="tab-btn-operational" class="flex-1 py-2.5 text-center text-cyan-400 border-b-2 border-cyan-400 bg-slate-900/50 transition">Operasional</button>
+                    <button onclick="switchTab('specs')" id="tab-btn-specs" class="flex-1 py-2.5 text-center text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition">Spesifikasi</button>
+                    <button onclick="switchTab('sop')" id="tab-btn-sop" class="flex-1 py-2.5 text-center text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition">SOP & K3</button>
+                </div>
+
+                <!-- Panel Body with Scrollbar -->
+                <div class="p-4 overflow-y-auto custom-scrollbar flex-1 text-xs text-gray-300">
+                    <div id="tab-content-operational" class="space-y-3.5">
+                        <div id="dynamic-controls" class="space-y-3"></div>
+                    </div>
+                    <div id="tab-content-specs" class="hidden space-y-3">
+                        <div class="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60">
+                            <span class="block text-[10px] text-cyan-400 font-bold uppercase mb-1">FUNGSI UTAMA</span>
+                            <p id="ins-function" class="leading-relaxed text-gray-200 text-[11px]">Deskripsi fungsi perangkat.</p>
+                        </div>
+                        <div class="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60">
+                            <span class="block text-[10px] text-cyan-400 font-bold uppercase mb-1.5">KOMPONEN FISIK ALAT</span>
+                            <ul id="ins-components" class="list-disc pl-4 space-y-1 text-gray-300 text-[11px]"></ul>
+                        </div>
+                        <div class="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60">
+                            <span class="block text-[10px] text-cyan-400 font-bold uppercase mb-1">TERMINAL INPUT / OUTPUT</span>
+                            <p id="ins-io" class="font-mono text-cyan-200 bg-black/40 p-2 rounded border border-slate-700 text-[11px]"></p>
+                        </div>
+                    </div>
+                    <div id="tab-content-sop" class="hidden space-y-3">
+                        <div class="bg-slate-800/60 p-3 rounded-lg border border-slate-700/60">
+                            <h4 class="text-[11px] font-bold text-cyan-300 mb-1.5 flex items-center gap-1.5">
+                                <span>📋</span> PROSEDUR PENGOPERASIAN STANDAR (SOP)
+                            </h4>
+                            <ul id="ins-sop" class="list-decimal pl-4 space-y-1.5 text-gray-300 text-[11px] leading-relaxed"></ul>
+                        </div>
+                        <div class="bg-red-950/40 p-3 rounded-lg border border-red-700/60">
+                            <h4 class="text-[11px] font-bold text-red-300 mb-1 flex items-center gap-1.5">
+                                <span>⚠️</span> KESELAMATAN & KESEHATAN KERJA (K3)
+                            </h4>
+                            <p id="ins-safety" class="text-red-200/90 text-[11px] leading-relaxed"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Panel Footer Status -->
+                <div class="bg-slate-950 p-2.5 px-4 border-t border-slate-800 flex justify-between items-center text-[10px] text-slate-400 font-mono">
+                    <span id="ins-status-indicator" class="flex items-center gap-1.5 text-emerald-400 font-bold">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> ONLINE / READY
+                    </span>
+                    <span id="ins-zone-label">STUDIO FLOOR</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL PANDUAN PENGGUNAAN -->
+    <div id="guide-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center pointer-events-auto">
+        <div class="bg-slate-900 border border-cyan-500/50 rounded-xl shadow-2xl max-w-2xl w-full mx-4 overflow-hidden">
+            <div class="p-4 border-b border-slate-800 bg-slate-800/50 flex justify-between items-center">
+                <h2 class="text-lg font-bold text-cyan-400 flex items-center gap-2">
+                    <span>📖</span> PANDUAN PENGGUNAAN SIMULATOR
+                </h2>
+                <button id="btn-close-guide-top" class="text-slate-400 hover:text-white transition w-8 h-8 rounded-md hover:bg-slate-700 flex items-center justify-center font-bold">✕</button>
+            </div>
+            <div class="p-6 text-sm text-slate-300 space-y-5 max-h-[65vh] overflow-y-auto custom-scrollbar">
+                <p class="text-base">Selamat datang di <strong>Virtual Broadcast Studio Simulator</strong>. Simulator ini dirancang untuk melatih pemahaman Anda tentang tata letak dan operasional perangkat studio TV profesional.</p>
+                
+                <div class="space-y-2">
+                    <h3 class="font-bold text-white text-base">🖱️ Cara Navigasi (Kamera 3D)</h3>
+                    <ul class="list-disc pl-5 space-y-1.5 bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
+                        <li><strong>Putar (Orbit):</strong> Klik kiri + tahan lalu geser mouse.</li>
+                        <li><strong>Geser (Pan):</strong> Klik kanan + tahan lalu geser mouse.</li>
+                        <li><strong>Zoom:</strong> Putar scroll wheel mouse.</li>
+                        <li class="text-cyan-400"><em>Layar Sentuh:</em> Geser 1 jari (Orbit), Geser 2 jari (Pan), Cubit layar (Zoom).</li>
+                    </ul>
+                </div>
+                
+                <div class="space-y-2">
+                    <h3 class="font-bold text-white text-base">🎛️ Cara Mengoperasikan Alat</h3>
+                    <ul class="list-disc pl-5 space-y-1.5">
+                        <li>Arahkan kursor ke perangkat (Kamera, Switcher, Audio Mixer, Lampu, Boom Mic) hingga kursor berubah.</li>
+                        <li><strong>Klik Kiri</strong> pada alat tersebut untuk memunculkan <strong>Panel Inspektur (Inspector)</strong> di sebelah kanan.</li>
+                        <li>Gunakan tab <strong>Operasional</strong> di panel untuk menekan tombol, menggeser slider, atau mengubah opsi. Perubahan akan langsung terlihat pada model 3D (seperti pergerakan Viewfinder, lampu Tally, dll).</li>
+                        <li>Baca bagian <strong>SOP & K3</strong> pada tab panel untuk mempelajari standar operasional prosedur penyiaran.</li>
+                    </ul>
+                </div>
+                
+                <div class="space-y-2">
+                    <h3 class="font-bold text-white text-base">🔌 Routing & Patchbay</h3>
+                    <p>Klik tombol <strong class="text-cyan-400">PATCHBAY ROUTING</strong> di menu atas untuk mempelajari bagaimana setiap kabel sinyal video (SDI), audio (XLR), dan data (DMX) dihubungkan antara Studio Panggung dan Ruang Kontrol (PCR).</p>
+                </div>
+            </div>
+            <div class="p-4 border-t border-slate-800 bg-slate-950 flex justify-end">
+                <button id="btn-close-guide" class="px-6 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg shadow-[0_0_15px_rgba(6,182,212,0.4)] transition">Mulai Simulasi</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: SIGNAL FLOW & PATCHBAY ROUTING -->
+    <div id="patchbay-modal" class="hidden fixed inset-6 bg-slate-950/95 backdrop-blur-md border border-slate-700 rounded-xl z-50 flex-col shadow-2xl overflow-hidden pointer-events-auto">
+        <div class="bg-slate-900 p-4 border-b border-slate-800 flex justify-between items-center">
+            <div>
+                <h3 class="text-white font-bold text-base flex items-center gap-2">
+                    <span class="text-cyan-400">🔌</span> MASTER SIGNAL ROUTING & SDI PATCHBAY MATRIX
+                </h3>
+                <p class="text-slate-400 text-xs mt-0.5">Topologi distribusi kabel fisik dari Studio Floor menuju Production Control Room (PCR)</p>
+            </div>
+            <button id="btn-close-patchbay" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-semibold border border-slate-600">Tutup</button>
+        </div>
+        <div class="p-6 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="bg-slate-900/90 border border-slate-800 p-4 rounded-lg">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-bold text-xs text-cyan-400">FEED 01 • CAM 1</span>
+                    <span class="w-2 h-2 bg-emerald-400 rounded-full animate-ping"></span>
+                </div>
+                <div class="text-xs text-slate-300 space-y-1 font-mono">
+                    <div>FROM : CAM 1 [12G-SDI OUT]</div>
+                    <div>TO &nbsp; : SWITCHER [SDI CH 1 IN]</div>
+                    <div class="text-[10px] text-slate-400 mt-2">Status: Locked 1080p59.94 / Genlock Active</div>
+                </div>
+            </div>
+            <div class="bg-slate-900/90 border border-slate-800 p-4 rounded-lg">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-bold text-xs text-cyan-400">FEED 02 • CAM 2</span>
+                    <span class="w-2 h-2 bg-emerald-400 rounded-full animate-ping"></span>
+                </div>
+                <div class="text-xs text-slate-300 space-y-1 font-mono">
+                    <div>FROM : CAM 2 [12G-SDI OUT]</div>
+                    <div>TO &nbsp; : SWITCHER [SDI CH 2 IN]</div>
+                    <div class="text-[10px] text-slate-400 mt-2">Status: Locked 1080p59.94 / Genlock Active</div>
+                </div>
+            </div>
+            <div class="bg-slate-900/90 border border-slate-800 p-4 rounded-lg">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-bold text-xs text-cyan-400">FEED 03 • CAM 3</span>
+                    <span class="w-2 h-2 bg-emerald-400 rounded-full animate-ping"></span>
+                </div>
+                <div class="text-xs text-slate-300 space-y-1 font-mono">
+                    <div>FROM : CAM 3 [12G-SDI OUT]</div>
+                    <div>TO &nbsp; : SWITCHER [SDI CH 3 IN]</div>
+                    <div class="text-[10px] text-slate-400 mt-2">Status: Locked 1080p59.94 / Genlock Active</div>
+                </div>
+            </div>
+            <div class="bg-slate-900/90 border border-slate-800 p-4 rounded-lg">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-bold text-xs text-purple-400">AUDIO FEED • BOOM MIC</span>
+                    <span class="w-2 h-2 bg-emerald-400 rounded-full"></span>
+                </div>
+                <div class="text-xs text-slate-300 space-y-1 font-mono">
+                    <div>FROM : SHOTGUN BOOM [XLR-M]</div>
+                    <div>TO &nbsp; : AUDIO MIXER [PREAMP CH 1]</div>
+                    <div class="text-[10px] text-slate-400 mt-2">Phantom: +48V ON / Low Cut Filter Active</div>
+                </div>
+            </div>
+            <div class="bg-slate-900/90 border border-slate-800 p-4 rounded-lg">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-bold text-xs text-amber-400">LIGHTING CONTROL • DMX</span>
+                    <span class="w-2 h-2 bg-emerald-400 rounded-full"></span>
+                </div>
+                <div class="text-xs text-slate-300 space-y-1 font-mono">
+                    <div>FROM : RACK DMX INTERFACE [OUT 1]</div>
+                    <div>TO &nbsp; : LIGHTING GRID RIG [DAISY CHAIN]</div>
+                    <div class="text-[10px] text-slate-400 mt-2">Protocol: DMX-512 Standard / Universe 1</div>
+                </div>
+            </div>
+            <div class="bg-slate-900/90 border border-slate-800 p-4 rounded-lg">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-bold text-xs text-red-400">MASTER PGM • ON-AIR BROADCAST</span>
+                    <span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                </div>
+                <div class="text-xs text-slate-300 space-y-1 font-mono">
+                    <div>FROM : SWITCHER [PGM MAIN OUT]</div>
+                    <div>TO &nbsp; : MULTIVIEW & TRANSMISSION RACK</div>
+                    <div class="text-[10px] text-slate-400 mt-2">Output: Clean Feed + Master Graphics (DSK)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- UI Event Listeners Script -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const guideModal = document.getElementById('guide-modal');
+            const btnShowGuide = document.getElementById('btn-show-guide');
+            const btnCloseGuide = document.getElementById('btn-close-guide');
+            const btnCloseGuideTop = document.getElementById('btn-close-guide-top');
+            
+            const patchbayModal = document.getElementById('patchbay-modal');
+            const btnShowPatchbay = document.getElementById('btn-show-patchbay');
+            const btnClosePatchbay = document.getElementById('btn-close-patchbay');
+
+            // --- Guide Modal Handlers ---
+            if (btnShowGuide) {
+                btnShowGuide.addEventListener('click', () => {
+                    guideModal.classList.remove('hidden');
+                });
+            }
+            if (btnCloseGuide) {
+                btnCloseGuide.addEventListener('click', () => {
+                    guideModal.classList.add('hidden');
+                });
+            }
+            if (btnCloseGuideTop) {
+                btnCloseGuideTop.addEventListener('click', () => {
+                    guideModal.classList.add('hidden');
+                });
+            }
+
+            // --- Patchbay Modal Handlers ---
+            if (btnShowPatchbay) {
+                btnShowPatchbay.addEventListener('click', () => {
+                    patchbayModal.classList.remove('hidden');
+                    patchbayModal.classList.add('flex');
+                });
+            }
+            if (btnClosePatchbay) {
+                btnClosePatchbay.addEventListener('click', () => {
+                    patchbayModal.classList.add('hidden');
+                    patchbayModal.classList.remove('flex');
+                });
+            }
+
+            // Tampilkan Guide Modal secara otomatis setelah loading selesai
+            setTimeout(() => {
+                if (guideModal) {
+                    guideModal.classList.remove('hidden');
+                }
+            }, 1200);
+        });
+    </script>
+
+<!-- Application Script (Three.js PBR Engine + Simulation Manager) -->
+<script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'https://unpkg.com/three@0.128.0/examples/jsm/controls/OrbitControls.js';
+    
+    // ==========================================
+    // 1. DATA & STATE MANAGEMENT LENGKAP
+    // ==========================================
+    const STATE = {
+        selectedObject: null,
+        hoveredObject: null,
+        isAnimatingCam: false,
+        camStartPos: new THREE.Vector3(),
+        camEndPos: new THREE.Vector3(),
+        targetStartPos: new THREE.Vector3(),
+        targetEndPos: new THREE.Vector3(),
+        animProgress: 0,
+        currentTab: 'operational'
+    };
+
+    const ZONES = {
+        studio: { cam: new THREE.Vector3(0, 6.5, 3.5), target: new THREE.Vector3(0, 0.5, -1.0) },
+        pcr: { cam: new THREE.Vector3(0, 2.5, -9), target: new THREE.Vector3(0, 1.5, -5) },
+        rack: { cam: new THREE.Vector3(-1.5, 1.8, -5), target: new THREE.Vector3(-3.5, 1, -7) },
+        lighting: { cam: new THREE.Vector3(0, 4, 3), target: new THREE.Vector3(0, 4.5, 0) },
+        default: { cam: new THREE.Vector3(6, 4, 8), target: new THREE.Vector3(0, 1, 0) }
+    };
+
+    // State operasional untuk setiap perangkat (dengan opsi & settingan interaktif)
+    const SIM_CONFIG = {
+        'cam1': {
+            power: true,
+            gain: '0dB',
+            wb: '5600K (Daylight)',
+            nd: 'Clear',
+            shutter: '1/50',
+            iris: 2.8,
+            fps: '59.94p'
+        },
+        'cam2': {
+            power: true,
+            gain: '0dB',
+            wb: '5600K (Daylight)',
+            nd: 'Clear',
+            shutter: '1/50',
+            iris: 4.0,
+            fps: '59.94p'
+        },
+        'cam3': {
+            power: true,
+            gain: '3dB',
+            wb: '5600K (Daylight)',
+            nd: 'Clear',
+            shutter: '1/50',
+            iris: 2.8,
+            fps: '59.94p'
+        },
+        'switcher': {
+            programBus: 'cam1',
+            previewBus: 'cam2',
+            transitionType: 'CUT',
+            transitionRate: 25,
+            dsk1: false,
+            ftb: false,
+            autoViewMode: 'DIRECTOR_CUT' 
+        },
+        'audiomixer': {
+            ch1Fader: 0,
+            ch2Fader: -4,
+            ch1Mute: false,
+            ch2Mute: false,
+            masterFader: 0,
+            phantom48v: true
+        },
+        'lightrig': {
+            power: true,
+            dimmer: 85,
+            cct: 5600,
+            fanMode: 'Silent'
+        },
+        'mic': {
+            power: true,
+            gainPreamp: 36,
+            lowCut: true,
+            polarPattern: 'Supercardioid'
+        },
+        'multiview': {
+            power: true,
+            layout: '6-Split (3x2)',
+            audioMeters: true,
+            tallyOverlay: true
+        },
+        'rack': {
+            power: true,
+            genlockSync: true,
+            upsStatus: '100% Battery / AC Line'
+        },
+        'desk': {
+            ledUnderglow: true,
+            colorScheme: 'Cyan / White'
+        }
+    };
+
+    const EQUIPMENT_REGISTRY = {
+        'cam1': {
+            name: 'Kamera Studio Master (CAM 1)', category: 'Video Acquisition', zone: 'Studio Floor',
+            function: 'Mengambil gambar utama (wide/medium shot) dari presenter dengan pedestal hidrolik dan transmisi 12G-SDI.',
+            components: ['Lensa Box 4K F/1.4', 'Viewfinder LCD 7-inch High-Bright', 'Hydraulic Pedestal & Steering Ring', 'Tally Light On-Air', 'Dual Pan-Bars', 'V-Lock Battery Plate'],
+            io: 'Output: 12G-SDI (BNC), Genlock In | Power: SMPTE Hybrid Fiber / XLR-4',
+            sop: [
+                'Pastikan steering lock pedestal dalam posisi terkunci sebelum menyalakan daya kamera.',
+                'Kalibrasi White Balance (AWB) menggunakan test card 90% pada pencahayaan studio aktif.',
+                'Periksa Tally lamp menyala MERAH saat switcher mengeksekusi CUT ke bus Program.',
+                'Gunakan steering ring untuk pergerakan tracking pedestal yang halus di studio.'
+            ],
+            safety: 'Kunci roda hidrolik pedestal setelah posisi ideal tercapai. Hindari menarik paksa kabel SMPTE/SDI di lantai.',
+            controls: [
+                { id: 'power', label: 'Main Power Unit', type: 'toggle' },
+                { id: 'gain', label: 'Master Sensor Gain', type: 'select', options: ['-3dB', '0dB', '3dB', '6dB', '9dB', '12dB'] },
+                { id: 'wb', label: 'White Balance Preset', type: 'select', options: ['3200K (Tungsten)', '5600K (Daylight)', 'Auto WB Memory A', 'Auto WB Memory B'] },
+                { id: 'nd', label: 'Optical ND Filter', type: 'select', options: ['Clear', '1/4 ND (2 Stops)', '1/16 ND (4 Stops)', '1/64 ND (6 Stops)'] },
+                { id: 'shutter', label: 'Electronic Shutter', type: 'select', options: ['1/50', '1/60', '1/100', '1/125', '1/250'] },
+                { id: 'iris', label: 'Iris Aperture', type: 'slider', min: 1.4, max: 16.0, step: 0.1, unit: 'f/' }
+            ]
+        },
+        'cam2': {
+            name: 'Kamera Studio Kiri (CAM 2)', category: 'Video Acquisition', zone: 'Studio Floor',
+            function: 'Mengambil sudut close-up presenter sisi kiri untuk shot respons dan dialog dua arah.',
+            components: ['Lensa Box 4K', 'Viewfinder LCD 7-inch', 'Hydraulic Pedestal', 'Steering Ring', 'Tally Light'],
+            io: 'Output: 12G-SDI | Power: SMPTE Hybrid Fiber',
+            sop: [
+                'Arahkan sudut framing fokus ke mata presenter kiri dengan rule of thirds.',
+                'Pastikan drag pan-tilt fluid head disesuaikan dengan bobot lensa.',
+                'Perhatikan lampu Tally hijau saat status berada di Preview (standby).'
+            ],
+            safety: 'Pastikan safety chain kamera terpasang dengan baik pada plate pedestal.',
+            controls: [
+                { id: 'power', label: 'Main Power Unit', type: 'toggle' },
+                { id: 'gain', label: 'Master Sensor Gain', type: 'select', options: ['-3dB', '0dB', '3dB', '6dB'] },
+                { id: 'wb', label: 'White Balance Preset', type: 'select', options: ['3200K (Tungsten)', '5600K (Daylight)', 'Memory A'] },
+                { id: 'iris', label: 'Iris Aperture', type: 'slider', min: 1.4, max: 16.0, step: 0.1, unit: 'f/' }
+            ]
+        },
+        'cam3': {
+            name: 'Kamera Studio Kanan (CAM 3)', category: 'Video Acquisition', zone: 'Studio Floor',
+            function: 'Mengambil sudut close-up presenter kanan dan tamu dengan pedestal hidrolik.',
+            components: ['Lensa Box 4K', 'Viewfinder LCD 7-inch', 'Hydraulic Pedestal', 'Steering Ring', 'Tally Light'],
+            io: 'Output: 12G-SDI | Power: SMPTE Hybrid Fiber',
+            sop: [
+                'Bidik framing presenter kanan dengan headroom seimbang.',
+                'Jaga kestabilan zoom servo pada saat presenter membawakan naskah berita.'
+            ],
+            safety: 'Jangan meninggalkan pedestal tanpa mengunci rem hidrolik di permukaan lantai.',
+            controls: [
+                { id: 'power', label: 'Main Power Unit', type: 'toggle' },
+                { id: 'gain', label: 'Master Sensor Gain', type: 'select', options: ['-3dB', '0dB', '3dB', '6dB'] },
+                { id: 'wb', label: 'White Balance Preset', type: 'select', options: ['3200K (Tungsten)', '5600K (Daylight)'] },
+                { id: 'iris', label: 'Iris Aperture', type: 'slider', min: 1.4, max: 16.0, step: 0.1, unit: 'f/' }
+            ]
+        },
+        'switcher': {
+            name: 'Video Production Switcher', category: 'Video Control', zone: 'Control Room (PCR)',
+            function: 'Memilih, mencampur, dan mengontrol transisi sinyal video multi-kamera untuk siaran master Program (PGM).',
+            components: ['Program Bus (On-Air)', 'Preview Bus (Preset)', 'T-Bar Transition Fader', 'CUT & AUTO Buttons', 'DSK & Keyer Section', 'OLED Mini Display'],
+            io: 'Input: 8x 12G-SDI | Output: 4x SDI (PGM, PVW, AUX 1, AUX 2) | Control: Ethernet LAN',
+            sop: [
+                'Pilih sumber video berikutnya pada tombol baris PREVIEW (hijau).',
+                'Tekan tombol CUT untuk pergantian kamera instan, atau dorong tuas T-Bar untuk transisi dissolve.',
+                'Pastikan DSK (grafis lower-third) aktif sebelum presenter membacakan identitas berita.'
+            ],
+            safety: 'Pastikan switcher terhubung ke UPS online murni untuk mencegah reboot tak terduga saat live on-air.',
+            controls: [
+                { id: 'programBus', label: 'Program Bus (On-Air / Tally Merah)', type: 'radio', options: [
+                    { value: 'cam1', label: 'CAM 1' },
+                    { value: 'cam2', label: 'CAM 2' },
+                    { value: 'cam3', label: 'CAM 3' }
+                ]},
+                { id: 'previewBus', label: 'Preview Bus (Preset / Tally Hijau)', type: 'radio', options: [
+                    { value: 'cam1', label: 'CAM 1' },
+                    { value: 'cam2', label: 'CAM 2' },
+                    { value: 'cam3', label: 'CAM 3' }
+                ]},
+                { id: 'autoViewMode', label: 'Kamera Viewport Dinamis (Sutradara)', type: 'select', options: [
+                    'DIRECTOR_CUT (Ikuti Kamera On-Air)',
+                    'MULTIVIEW_FOCUS (Fokus Monitor Wall PCR)',
+                    'OPERATOR_OVERVIEW (Konsol Switcher & Multiview)',
+                    'MANUAL (Bebas/Tetap di Posisi Saat Ini)'
+                ]},
+                { id: 'transitionType', label: 'Transition Style', type: 'select', options: ['CUT', 'AUTO MIX (Dissolve)', 'WIPE Horizontal'] },
+                { id: 'transitionRate', label: 'Auto Mix Duration', type: 'slider', min: 10, max: 60, step: 5, unit: 'frames' },
+                { id: 'dsk1', label: 'Downstream Keyer (Lower Third GFX)', type: 'toggle' },
+                { id: 'ftb', label: 'Fade to Black Master (FTB)', type: 'toggle' }
+            ]
+        },
+        'audiomixer': {
+            name: 'Audio Mixing Console', category: 'Audio Control', zone: 'Control Room (PCR)',
+            function: 'Mengatur gain, EQ, dinamika, dan mencampur level suara mikrofon studio untuk siaran broadcast.',
+            components: ['Motorized Faders', 'Channel Preamp Pots', 'LED Stereo VU Meters', 'Mute/Solo Buttons', 'Master Fader'],
+            io: 'Input: 16x XLR/TRS (+48V Phantom) | Output: Balanced XLR Master L/R, Monitor Out',
+            sop: [
+                'Pastikan phantom power +48V aktif untuk mic shotgun kondensor.',
+                'Atur gain preamp hingga puncak vokal berada di kisaran -18 dBFS hingga -12 dBFS pada meter VU.',
+                'Gunakan tombol MUTE saat presenter tidak berbicara untuk meminimalisir spill noise ruangan.'
+            ],
+            safety: 'Mute fader master sebelum menyalakan atau mematikan monitor speaker studio.',
+            controls: [
+                { id: 'ch1Fader', label: 'CH 1 Level - Host Mic', type: 'slider', min: -60, max: 10, step: 1, unit: 'dB' },
+                { id: 'ch2Fader', label: 'CH 2 Level - Co-Host / Aux', type: 'slider', min: -60, max: 10, step: 1, unit: 'dB' },
+                { id: 'ch1Mute', label: 'CH 1 Host MUTE', type: 'toggle' },
+                { id: 'masterFader', label: 'Master Broadcast Fader', type: 'slider', min: -60, max: 10, step: 1, unit: 'dB' },
+                { id: 'phantom48v', label: 'Phantom Power +48V Global', type: 'toggle' }
+            ]
+        },
+        'multiview': {
+            name: 'Multiview Monitor Wall', category: 'Monitoring', zone: 'Control Room (PCR)',
+            function: 'Menampilkan feed seluruh kamera, preview preset, program on-air, dan status genlock dalam satu layar besar.',
+            components: ['Panel LED 55-inch Bezel-Less Ultra-HD', 'Low-Latency Processor', 'Wall Mount Bracket'],
+            io: 'Input: 4x SDI / HDMI | Control: RS-422 / IP',
+            sop: [
+                'Sutradara wajib memantau kotak Program (merah) dan Preview (hijau) sebelum menginstruksikan transisi.',
+                'Periksa VU meter di layar multiview untuk memastikan audio tidak clipping.'
+            ],
+            safety: 'Gunakan ventilasi pendingin aktif di belakang panel monitor agar suhu operasional tetap aman.',
+            controls: [
+                { id: 'power', label: 'Display Panel Power', type: 'toggle' },
+                { id: 'layout', label: 'Screen Split Layout', type: 'select', options: ['6-Split (3x2)', '8-Split (4x2)', 'Quad Split'] },
+                { id: 'audioMeters', label: 'Overlay Audio VU Meters', type: 'toggle' },
+                { id: 'tallyOverlay', label: 'Border Tally Box Overlay', type: 'toggle' }
+            ]
+        },
+        'desk': {
+            name: 'News Anchor Desk & Set', category: 'Set & Props', zone: 'Studio Floor',
+            function: 'Panggung talkshow berita utama tempat presenter menyampaikan warta.',
+            components: ['Podium Lengkung PBR', 'Layar Backdrop Belakang', 'Meja Anchor Kayu Walnut', 'Aksen Lis Biru LED'],
+            io: 'Power: AC 220V untuk backlight panggung',
+            sop: ['Bersihkan permukaan meja sebelum siaran untuk menghindari pantulan lampu studio yang berlebih.'],
+            safety: 'Pastikan jalur kabel presenter di belakang meja tertutup pelindung kabel (cable protector).',
+            controls: [
+                { id: 'ledUnderglow', label: 'Podium Underglow Accent', type: 'toggle' },
+                { id: 'colorScheme', label: 'Backdrop Illumination Color', type: 'select', options: ['Cyan / White', 'Deep Blue', 'Warm Amber'] }
+            ]
+        },
+        'rack': {
+            name: 'Equipment Rack & Patch Panel', category: 'Infrastructure', zone: 'Technical Area',
+            function: 'Menyimpan frame sinkronisasi, router video SDI, audio interface, server playout, dan power distributor.',
+            components: ['Rak 19-inch 42U Heavy Duty', 'Video Master Router', 'Audio Interface Converter', 'Patch Bay BNC/XLR', 'UPS Sinewave 3000VA'],
+            io: 'Beragam (12G-SDI, Dante Audio, SMPTE Fiber, AC Power)',
+            sop: [
+                'Pastikan lampu indikator Genlock Master Sync berwarna hijau sebelum produksi dimulai.',
+                'Catat setiap penambahan patch kabel jumper di logbook teknis studio.'
+            ],
+            safety: 'Dilarang membuka panel distribusi daya tegangan tinggi tanpa sertifikasi teknisi resmi.',
+            controls: [
+                { id: 'power', label: 'Master Rack Power PDU', type: 'toggle' },
+                { id: 'genlockSync', label: 'Tri-Level Genlock Generator', type: 'toggle' }
+            ]
+        },
+        'lightrig': {
+            name: 'Studio Lighting Rig', category: 'Lighting', zone: 'Lighting Grid',
+            function: 'Sistem tata cahaya 3-point lighting (Key, Fill, Back) dengan kendali DMX512.',
+            components: ['Pipa Truss Plafon Studio', 'Lampu LED Panel (Fill)', 'Lampu Fresnel (Key/Back)', 'Barn Doors 4-Way', 'Klem Pengaman C-Clamp'],
+            io: 'Power: AC 220V | Control: DMX512 (5-pin XLR)',
+            sop: [
+                'Atur dimmer key light untuk menghasilkan exposure wajah presenter yang seimbang.',
+                'Sesuaikan barn doors lampu agar cahaya tidak tumpah (spill) ke layar prompter atau lensa kamera.'
+            ],
+            safety: 'Selalu gunakan tali pengaman kawat baja (safety cable) pada setiap fixture lampu yang digantung di truss.',
+            controls: [
+                { id: 'power', label: 'Lighting Master Power', type: 'toggle' },
+                { id: 'dimmer', label: 'Master Rig Dimmer Intensity', type: 'slider', min: 0, max: 100, step: 1, unit: '%' },
+                { id: 'cct', label: 'Color Temperature (CCT)', type: 'slider', min: 3200, max: 6500, step: 100, unit: 'K' },
+                { id: 'fanMode', label: 'Fixture Fan Acoustic Mode', type: 'select', options: ['Silent', 'Studio Low', 'High Performance'] }
+            ]
+        },
+        'mic': {
+            name: 'Boom / Shotgun Microphone', category: 'Audio Acquisition', zone: 'Studio Floor',
+            function: 'Menangkap suara presenter dengan direktivitas tinggi tanpa terlihat di dalam frame kamera.',
+            components: ['Shotgun Capsule Kondensor', 'Boom Pole Teleskopik', 'Shockmount Anti-Vibrasi', 'Pemberat Base Kubah Logam'],
+            io: 'Output: Balanced XLR Male',
+            sop: [
+                'Arahkan kapsul mikrofon tepat ke dada presenter dari luar batas frame atas.',
+                'Gunakan shockmount berkualitas agar getaran lantai tidak masuk ke rekaman audio.'
+            ],
+            safety: 'Pastikan baut pengunci counterweight boom arm kencang sebelum diarahkan di atas area presenter.',
+            controls: [
+                { id: 'power', label: 'Mic Preamp Active', type: 'toggle' },
+                { id: 'gainPreamp', label: 'Analog Preamp Gain', type: 'slider', min: 10, max: 60, step: 1, unit: 'dB' },
+                { id: 'lowCut', label: 'Low Cut High-Pass Filter (80Hz)', type: 'toggle' },
+                { id: 'polarPattern', label: 'Polar Directional Pattern', type: 'select', options: ['Supercardioid', 'Lobar / Shotgun'] }
+            ]
+        }
+    };
+
+    const INTERACTIVE_OBJECTS = [];
+    const TALLY_LAMPS = new Map();
+    const LIGHTING_SPOTS = [];
+
+    // ==========================================
+    // 2. SCENE, CAMERA, RENDERER SETUP
+    // ==========================================
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x050a15);
+    scene.fog = new THREE.FogExp2(0x050a15, 0.02);
+
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.copy(ZONES.default.cam);
+
+    // ==========================================
+    // KAMERA VIRTUAL & RENDER TARGETS VIEWFINDER
+    // ==========================================
+    function createCamFeedPipeline(aspect = 512 / 256) {
+        const cam = new THREE.PerspectiveCamera(40, aspect, 0.05, 50);
+        const target = new THREE.WebGLRenderTarget(512, 256, {
+            minFilter: THREE.LinearFilter,
+            magFilter: THREE.LinearFilter,
+            format: THREE.RGBAFormat,
+            encoding: THREE.sRGBEncoding
+        });
+
+        const compCanvas = document.createElement('canvas');
+        compCanvas.width = 512;
+        compCanvas.height = 256;
+        const compCtx = compCanvas.getContext('2d');
+
+        const feedCanvas = document.createElement('canvas');
+        feedCanvas.width = 512;
+        feedCanvas.height = 256;
+        const feedCtx = feedCanvas.getContext('2d');
+        const feedImageData = feedCtx.createImageData(512, 256);
+        const pixelBuf = new Uint8Array(512 * 256 * 4);
+
+        const tex = new THREE.CanvasTexture(compCanvas);
+        tex.encoding = THREE.sRGBEncoding;
+
+        return {
+            camera: cam,
+            target: target,
+            compCanvas: compCanvas,
+            compCtx: compCtx,
+            feedCanvas: feedCanvas,
+            feedCtx: feedCtx,
+            feedImageData: feedImageData,
+            pixelBuf: pixelBuf,
+            texture: tex,
+            meshRef: null
+        };
+    }
+
+    const VF_PIPELINES = {
+        'cam1': createCamFeedPipeline(),
+        'cam2': createCamFeedPipeline(),
+        'cam3': createCamFeedPipeline()
+    };
+
+    VF_PIPELINES.cam1.camera.position.set(0, 1.15, -1.88);
+    VF_PIPELINES.cam1.camera.lookAt(0, 1.05, 1.0);
+
+    VF_PIPELINES.cam2.camera.position.set(-1.82, 1.15, -0.92);
+    VF_PIPELINES.cam2.camera.lookAt(-0.55, 1.05, 0.5);
+
+    VF_PIPELINES.cam3.camera.position.set(1.82, 1.15, -0.92);
+    VF_PIPELINES.cam3.camera.lookAt(0.55, 1.05, 0.5);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.sortObjects = true;
+    container.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.maxPolarAngle = Math.PI / 2 - 0.05;
+    controls.minDistance = 1;
+    controls.maxDistance = 20;
+    controls.target.copy(ZONES.default.target);
+
+    // ==========================================
+    // 3. PBR MATERIALS & PROCEDURAL TEXTURES
+    // ==========================================
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+    const envScene = new THREE.Scene();
+    const envLight1 = new THREE.Mesh(new THREE.BoxGeometry(10,1,10), new THREE.MeshBasicMaterial({color: 0xffffff}));
+    envLight1.position.set(0, 10, 0);
+    envScene.add(envLight1);
+    const envLight2 = new THREE.Mesh(new THREE.BoxGeometry(2,5,2), new THREE.MeshBasicMaterial({color: 0x555555}));
+    envLight2.position.set(0, 2, -10);
+    envScene.add(envLight2);
+    scene.environment = pmremGenerator.fromScene(envScene).texture;
+
+    const MATS = {
+        blackMatte: new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8, metalness: 0.1 }),
+        darkGrey: new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6, metalness: 0.3 }),
+        lightGrey: new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5, metalness: 0.4 }),
+        metal: new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.3, metalness: 0.8 }),
+        blackMetal: new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.4, metalness: 0.7 }),
+        glass: new THREE.MeshPhysicalMaterial({
+            color: 0xcde8ff, transparent: true, opacity: 0.22, metalness: 0.1, roughness: 0.08,
+            clearcoat: 1.0, clearcoatRoughness: 0.1, transmission: 0.75, ior: 1.45,
+            depthWrite: false, depthTest: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
+        }),
+        lensCoating: new THREE.MeshPhysicalMaterial({ color: 0x1a0033, metalness: 0.2, roughness: 0.1, transmission: 0.8, thickness: 0.2, ior: 1.6 }),
+        wood: new THREE.MeshStandardMaterial({ color: 0x3d2314, roughness: 0.7, metalness: 0.0 }),
+        redLight: new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 2 }),
+        greenLight: new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x00ff00, emissiveIntensity: 1.5 }),
+        whiteLight: new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 2 })
+    };
+
+    function createCanvasTexture(drawFunc, width = 512, height = 512) {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        drawFunc(ctx, width, height);
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.encoding = THREE.sRGBEncoding;
+        return tex;
+    }
+
+    const floorTex = createCanvasTexture((ctx, w, h) => {
+        ctx.fillStyle = '#0a0a0c';
+        ctx.fillRect(0, 0, w, h);
+        for(let i=0; i<1000; i++) {
+            ctx.fillStyle = `rgba(255,255,255,${Math.random()*0.02})`;
+            ctx.fillRect(Math.random()*w, Math.random()*h, 2, 2);
+        }
+    });
+    floorTex.wrapS = floorTex.wrapT = THREE.RepeatWrapping;
+    floorTex.repeat.set(10, 10);
+    MATS.floor = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.3, metalness: 0.1 });
+
+    const smpteTex = createCanvasTexture((ctx, w, h) => {
+        const colors = ['#c0c0c0', '#c0c000', '#00c0c0', '#00c000', '#c000c0', '#c00000', '#0000c0'];
+        const barW = w / 7;
+        for(let i=0; i<7; i++) { ctx.fillStyle = colors[i]; ctx.fillRect(i*barW, 0, barW, h*0.67); }
+        ctx.fillStyle = '#0000c0'; ctx.fillRect(0, h*0.67, barW, h*0.08);
+        ctx.fillStyle = '#111111'; ctx.fillRect(barW, h*0.67, barW, h*0.08);
+        ctx.fillStyle = '#c000c0'; ctx.fillRect(barW*2, h*0.67, barW, h*0.08);
+        ctx.fillStyle = '#111111'; ctx.fillRect(barW*3, h*0.67, barW, h*0.08);
+        ctx.fillStyle = '#00c0c0'; ctx.fillRect(barW*4, h*0.67, barW, h*0.08);
+        ctx.fillStyle = '#111111'; ctx.fillRect(barW*5, h*0.67, w-barW*5, h*0.08);
+        ctx.fillStyle = '#000000'; ctx.fillRect(0, h*0.75, w, h*0.25);
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(w*0.7, h*0.75, w*0.15, h*0.25);
+    });
+    MATS.screenSMPTE = new THREE.MeshStandardMaterial({ map: smpteTex, emissive: 0xffffff, emissiveMap: smpteTex, emissiveIntensity: 0.8 });
+
+    const mvCanvas = document.createElement('canvas');
+    mvCanvas.width = 1024;
+    mvCanvas.height = 512;
+    const mvCtx = mvCanvas.getContext('2d');
+    const mvTexture = new THREE.CanvasTexture(mvCanvas);
+    mvTexture.encoding = THREE.sRGBEncoding;
+    MATS.screenMultiview = new THREE.MeshStandardMaterial({
+        map: mvTexture, emissive: 0xffffff, emissiveMap: mvTexture, emissiveIntensity: 0.85, roughness: 0.2
+    });
+
+    const switcherTex = createCanvasTexture((ctx, w, h) => {
+        const grad = ctx.createLinearGradient(0,0,0,h);
+        grad.addColorStop(0, '#2a2b2e'); grad.addColorStop(1, '#111215');
+        ctx.fillStyle = grad; ctx.fillRect(0,0,w,h);
+        ctx.fillStyle = 'rgba(255,255,255,0.015)';
+        for(let i=0; i<h; i+=4) ctx.fillRect(0, i, w, 1);
+        ctx.fillStyle = '#050505'; ctx.fillRect(40, 30, 450, 140);
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 6; ctx.strokeRect(40, 30, 450, 140);
+        ctx.strokeStyle = '#06b6d4'; ctx.lineWidth = 2; ctx.strokeRect(42, 32, 446, 136);
+        ctx.fillStyle = '#06b6d4'; ctx.font = 'bold 22px monospace';
+        ctx.fillText('BLVS PRODUCTION ATEM - M/E 1', 60, 70);
+        ctx.fillStyle = '#aaa'; ctx.font = '18px monospace';
+        ctx.fillText('SYS: ONLINE   |   FPS: 59.94', 60, 110);
+        ctx.fillText('GENLOCK: SYNC |   DSK: OFF', 60, 140);
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 2;
+        ctx.strokeRect(30, 200, 620, 280); ctx.strokeRect(670, 200, 320, 280);
+        ctx.fillStyle = '#777'; ctx.font = 'bold 16px sans-serif';
+        ctx.fillText('PROGRAM BUS', 40, 230); ctx.fillText('PREVIEW BUS', 40, 350); ctx.fillText('TRANSITION', 680, 230);
+        ctx.fillStyle = '#aaa'; ctx.font = 'bold 14px sans-serif';
+        for(let i=0; i<10; i++) {
+            let x = 113 + i * 68.2;
+            ctx.fillText('CAM ' + (i+1), x - 18, 255); ctx.fillText('CAM ' + (i+1), x - 18, 380);
+        }
+        ctx.fillText('CUT', 750, 340); ctx.fillText('AUTO', 830, 340);
+        ctx.fillStyle = '#333'; ctx.font = 'bold 36px sans-serif';
+        ctx.fillText('PRO-SWITCH 4K', 700, 100);
+    }, 1024, 512);
+    MATS.switcherFace = new THREE.MeshStandardMaterial({ map: switcherTex, roughness: 0.5, metalness: 0.7 });
+
+    const audioMixerTex = createCanvasTexture((ctx, w, h) => {
+        const grad = ctx.createLinearGradient(0,0,0,h);
+        grad.addColorStop(0, '#1c1c1f'); grad.addColorStop(1, '#111215');
+        ctx.fillStyle = grad; ctx.fillRect(0,0,w,h);
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 2;
+        const numCh = 8; const chW = (w * 0.7) / numCh; const masterStart = w * 0.75;
+        for(let i=0; i<numCh; i++) {
+            let cx = 30 + i * chW;
+            ctx.beginPath(); ctx.moveTo(cx, 20); ctx.lineTo(cx, h-20); ctx.stroke();
+            ctx.fillStyle = '#666'; ctx.font = 'bold 12px sans-serif'; ctx.fillText('CH ' + (i+1), cx + 25, h - 40);
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            for(let j=0; j<4; j++) {
+                let ky = 70 + j * 60;
+                ctx.beginPath(); ctx.arc(cx + 42, ky, 18, 0, Math.PI*2); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx+42, ky-22); ctx.lineTo(cx+42, ky-14); ctx.stroke();
+            }
+            ctx.fillStyle = '#888';
+            for(let k=0; k<12; k++) {
+                let ty = h - 220 + k * 14;
+                ctx.fillRect(cx + 25, ty, 6, 2);
+                if(k === 3) { ctx.fillStyle = '#06b6d4'; ctx.fillRect(cx + 15, ty, 16, 2); ctx.fillStyle = '#888'; }
+            }
+            ctx.fillStyle = '#7a1010'; ctx.fillRect(cx + 22, h - 265, 18, 14);
+            ctx.fillStyle = '#a89010'; ctx.fillRect(cx + 45, h - 265, 18, 14);
+        }
+        ctx.fillStyle = '#080808'; ctx.fillRect(masterStart, 30, w * 0.22, h - 60);
+        ctx.strokeStyle = '#333'; ctx.lineWidth = 4; ctx.strokeRect(masterStart, 30, w * 0.22, h - 60);
+        const ledX = masterStart + 40; const ledW = 12;
+        for(let i=0; i<16; i++) {
+            let ly = 60 + i * 14;
+            ctx.fillStyle = (i < 3) ? '#ff1111' : (i < 6) ? '#ffcc00' : '#11ff11';
+            ctx.globalAlpha = (i > 3 && Math.random() > 0.4) ? 0.15 : 0.9; ctx.fillRect(ledX, ly, ledW, 8);
+            ctx.globalAlpha = (i > 3 && Math.random() > 0.4) ? 0.15 : 0.9; ctx.fillRect(ledX + 25, ly, ledW, 8);
+        }
+        ctx.globalAlpha = 1.0;
+        ctx.fillStyle = '#aaa'; ctx.font = '10px sans-serif';
+        ctx.fillText('L', ledX + 3, 50); ctx.fillText('R', ledX + 28, 50);
+        ctx.fillStyle = '#ddd'; ctx.font = 'bold 24px sans-serif';
+        ctx.fillText('STUDIO-MIX', masterStart + 80, 100);
+        ctx.fillStyle = '#06b6d4'; ctx.font = '14px monospace';
+        ctx.fillText('DIGITAL 8-CH', masterStart + 80, 120);
+        ctx.fillStyle = '#888';
+        for(let k=0; k<12; k++) {
+            let ty = h - 220 + k * 14;
+            ctx.fillRect(masterStart + 120, ty, 8, 2);
+            if(k === 3) { ctx.fillStyle = '#06b6d4'; ctx.fillRect(masterStart + 110, ty, 20, 2); ctx.fillStyle = '#888'; }
+        }
+    }, 1024, 512);
+    MATS.mixerFace = new THREE.MeshStandardMaterial({ map: audioMixerTex, roughness: 0.55, metalness: 0.6 });
+
+    // ==========================================
+    // 4. MODELING HELPERS (ANTI-KOTAK)
+    // ==========================================
+    function createRoundedBoxGeo(width, height, depth, radius, smoothness) {
+        let shape = new THREE.Shape();
+        let eps = 0.00001; let r = radius - eps;
+        shape.absarc(eps, eps, eps, -Math.PI/2, -Math.PI, true);
+        shape.absarc(eps, height - r*2, eps, Math.PI, Math.PI/2, true);
+        shape.absarc(width - r*2, height - r*2, eps, Math.PI/2, 0, true);
+        shape.absarc(width - r*2, eps, eps, 0, -Math.PI/2, true);
+        let geo = new THREE.ExtrudeGeometry(shape, {
+            depth: depth - radius*2, bevelEnabled: true, bevelSegments: smoothness, steps: 1,
+            bevelSize: radius, bevelThickness: radius, curveSegments: smoothness
+        });
+        geo.center(); return geo;
+    }
+
+    function createInteractiveObject(group, id) {
+        group.userData.id = id; group.userData.isInteractive = true;
+        const box = new THREE.Box3().setFromObject(group);
+        const size = box.getSize(new THREE.Vector3());
+        const center = box.getCenter(new THREE.Vector3());
+        const hitGeo = new THREE.BoxGeometry(size.x, size.y, size.z);
+        const hitMat = new THREE.MeshBasicMaterial({visible: false});
+        const hitMesh = new THREE.Mesh(hitGeo, hitMat);
+        hitMesh.position.copy(center);
+        group.worldToLocal(hitMesh.position);
+        hitMesh.userData.id = id; hitMesh.userData.isHitBox = true;
+        group.add(hitMesh);
+        INTERACTIVE_OBJECTS.push(hitMesh);
+        return group;
+    }
+
+    // ==========================================
+    // 5. BUILD ENVIRONMENT
+    // ==========================================
+    function buildStudioRoom() {
+        const room = new THREE.Group();
+        const floorGeo = new THREE.PlaneGeometry(20, 20);
+        const floor = new THREE.Mesh(floorGeo, MATS.floor);
+        floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; room.add(floor);
+
+        const wallGeo = new THREE.BoxGeometry(20, 5, 0.5);
+        const wallMat = new THREE.MeshStandardMaterial({color: 0x111318, roughness: 0.9});
+        const wallL = new THREE.Mesh(wallGeo, wallMat); wallL.position.set(-10, 2.5, 0); wallL.rotation.y = Math.PI/2; wallL.receiveShadow = true;
+        const wallR = new THREE.Mesh(wallGeo, wallMat); wallR.position.set(10, 2.5, 0); wallR.rotation.y = -Math.PI/2; wallR.receiveShadow = true;
+        const wallB = new THREE.Mesh(wallGeo, wallMat); wallB.position.set(0, 2.5, 10); wallB.receiveShadow = true;
+        room.add(wallL, wallR, wallB);
+
+        const wallTop = new THREE.Mesh(new THREE.BoxGeometry(20, 1, 0.5), wallMat); wallTop.position.set(0, 4.5, -5); wallTop.receiveShadow = true;
+        const wallBot = new THREE.Mesh(new THREE.BoxGeometry(20, 1, 0.5), wallMat); wallBot.position.set(0, 0.5, -5); wallBot.receiveShadow = true;
+        const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 0.5), wallMat); wallLeft.position.set(-8.5, 2.5, -5); wallLeft.receiveShadow = true;
+        const wallRight = new THREE.Mesh(new THREE.BoxGeometry(3, 3, 0.5), wallMat); wallRight.position.set(8.5, 2.5, -5); wallRight.receiveShadow = true;
+        room.add(wallTop, wallBot, wallLeft, wallRight);
+
+        const windowGeo = new THREE.BoxGeometry(13.9, 2.9, 0.02);
+        const winMesh = new THREE.Mesh(windowGeo, MATS.glass); winMesh.position.set(0, 2.5, -5); winMesh.renderOrder = 1; room.add(winMesh);
+        
+        const frameMat = new THREE.MeshStandardMaterial({color: 0x050505, roughness: 0.5});
+        const fT = new THREE.Mesh(new THREE.BoxGeometry(14.0, 0.1, 0.56), frameMat); fT.position.set(0, 4.0, -5);
+        const fB = new THREE.Mesh(new THREE.BoxGeometry(14.0, 0.1, 0.56), frameMat); fB.position.set(0, 1.0, -5);
+        const fL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 3.0, 0.56), frameMat); fL.position.set(-7.0, 2.5, -5);
+        const fR = new THREE.Mesh(new THREE.BoxGeometry(0.1, 3.0, 0.56), frameMat); fR.position.set(7.0, 2.5, -5);
+        room.add(fT, fB, fL, fR);
+
+        scene.add(room);
+    }
+
+    // ==========================================
+    // 6. PROCEDURAL EQUIPMENT BUILDERS
+    // ==========================================
+    function buildCamera(x, y, z, rotY, id) {
+        if (!MATS.screenVF) {
+            const vfTex = createCanvasTexture((ctx, w, h) => {
+                ctx.fillStyle = '#050505'; ctx.fillRect(0, 0, w, h);
+                ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 2; ctx.strokeRect(w*0.1, h*0.1, w*0.8, h*0.8);
+                ctx.beginPath(); ctx.moveTo(w/2, h/2 - 20); ctx.lineTo(w/2, h/2 + 20); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(w/2 - 20, h/2); ctx.lineTo(w/2 + 20, h/2); ctx.stroke();
+                ctx.fillStyle = '#ff2222'; ctx.font = 'bold 24px sans-serif'; ctx.fillText('• REC', 20, 35);
+                ctx.fillStyle = '#22ff22'; ctx.font = 'bold 20px monospace'; ctx.fillText('TC 10:04:26:00', w - 200, 35);
+                ctx.fillStyle = '#fff'; ctx.font = '16px sans-serif'; 
+                ctx.fillText('F1.8   1/50   ISO 800', 20, h - 20); ctx.fillText('BATT 14.4V', w - 120, h - 20);
+            }, 512, 256);
+            MATS.screenVF = new THREE.MeshStandardMaterial({ map: vfTex, emissive: 0xffffff, emissiveMap: vfTex, emissiveIntensity: 0.6 });
+
+            const camSideTex = createCanvasTexture((ctx, w, h) => {
+                const grad = ctx.createLinearGradient(0,0,0,h);
+                grad.addColorStop(0, '#2a2b2e'); grad.addColorStop(1, '#15161a');
+                ctx.fillStyle = grad; ctx.fillRect(0,0,w,h);
+                ctx.fillStyle = '#111'; ctx.fillRect(15, 15, w-30, h-30);
+                ctx.fillStyle = '#050505'; ctx.fillRect(30, 30, 130, 90);
+                ctx.strokeStyle = '#06b6d4'; ctx.lineWidth = 2; ctx.strokeRect(30, 30, 130, 90);
+                ctx.fillStyle = '#06b6d4'; ctx.font = '14px sans-serif'; 
+                ctx.fillText('MENU', 40, 55); ctx.fillText('AUDIO', 40, 75); ctx.fillText('SYSTEM', 40, 95);
+                ctx.beginPath(); ctx.arc(230, 75, 30, 0, Math.PI*2);
+                ctx.fillStyle = '#0a0a0a'; ctx.fill(); ctx.lineWidth = 4; ctx.strokeStyle = '#444'; ctx.stroke();
+                ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif'; ctx.fillText('ND', 220, 80);
+                for(let i=0; i<4; i++) {
+                    ctx.fillStyle = '#222'; ctx.fillRect(320 + i*30, 30, 15, 75);
+                    const lvl = 10 + i*15 + (Math.random() * 10);
+                    ctx.fillStyle = '#06b6d4'; ctx.fillRect(320 + i*30, 105 - lvl, 15, lvl);
+                }
+                ctx.fillStyle = '#777'; ctx.font = 'bold 22px sans-serif'; ctx.fillText('STUDIO PRO 4K', 30, h - 35);
+            }, 512, 256);
+            MATS.camSide = new THREE.MeshStandardMaterial({ map: camSideTex, roughness: 0.6, metalness: 0.5 });
+        }
+
+        const group = new THREE.Group();
+        const pedGroup = new THREE.Group();
+        const centerHub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 0.1, 32), MATS.blackMetal);
+        centerHub.position.set(0, 0.1, 0); pedGroup.add(centerHub);
+        
+        for(let i=0; i<3; i++) {
+            const angle = (i/3) * Math.PI * 2;
+            const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.5), MATS.darkGrey);
+            arm.position.set(Math.cos(angle)*0.25, 0.1, Math.sin(angle)*0.25); arm.rotation.y = -angle + Math.PI/2; pedGroup.add(arm);
+            const caster = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.08, 16), MATS.blackMatte);
+            caster.rotation.z = Math.PI/2; caster.position.set(Math.cos(angle)*0.45, 0.06, Math.sin(angle)*0.45); pedGroup.add(caster);
+        }
+
+        const col1 = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.4, 32), MATS.blackMetal); col1.position.set(0, 0.35, 0); pedGroup.add(col1);
+        const col2 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.3, 32), MATS.metal); col2.position.set(0, 0.65, 0); pedGroup.add(col2);
+        
+        const steeringRing = new THREE.Mesh(new THREE.TorusGeometry(0.35, 0.02, 16, 32), MATS.metal); steeringRing.position.set(0, 0.65, 0); steeringRing.rotation.x = Math.PI/2; pedGroup.add(steeringRing);
+        const steeringSpoke = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.015, 0.04), MATS.metal); steeringSpoke.position.set(0, 0.65, 0); pedGroup.add(steeringSpoke);
+        
+        const fluidBase = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.1, 32), MATS.blackMatte); fluidBase.position.set(0, 0.85, 0); pedGroup.add(fluidBase);
+        const tiltBlock = new THREE.Mesh(createRoundedBoxGeo(0.15, 0.15, 0.2, 0.02, 2), MATS.blackMetal); tiltBlock.position.set(0, 0.95, 0); pedGroup.add(tiltBlock);
+        
+        for(let i=-1; i<=1; i+=2) {
+            const panBar = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.45), MATS.metal);
+            panBar.position.set(i*0.12, 0.95, 0.25); panBar.rotation.x = Math.PI/6;
+            const panGrip = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.12), MATS.blackMatte);
+            panGrip.position.set(i*0.12, 0.84, 0.44); panGrip.rotation.x = Math.PI/6;
+            pedGroup.add(panBar, panGrip);
+        }
+        group.add(pedGroup);
+
+        const camHeight = 1.15;
+        const body = new THREE.Mesh(createRoundedBoxGeo(0.18, 0.22, 0.45, 0.02, 2), MATS.darkGrey); body.position.set(0, camHeight, 0); body.castShadow = true; group.add(body);
+        const sidePanel = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.2), MATS.camSide); sidePanel.position.set(0.091, camHeight, 0); sidePanel.rotation.y = Math.PI/2; group.add(sidePanel);
+        const batt = new THREE.Mesh(createRoundedBoxGeo(0.16, 0.18, 0.08, 0.01, 2), MATS.blackMatte); batt.position.set(0, camHeight, 0.26); group.add(batt);
+        const lensBase = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.1, 32), MATS.metal); lensBase.rotation.x = Math.PI/2; lensBase.position.set(0, camHeight, -0.27); group.add(lensBase);
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.2, 32), MATS.blackMatte); barrel.rotation.x = Math.PI/2; barrel.position.set(0, camHeight, -0.4); barrel.castShadow = true; group.add(barrel);
+        const ringGeo = new THREE.CylinderGeometry(0.068, 0.068, 0.03, 32);
+        const ring1 = new THREE.Mesh(ringGeo, MATS.darkGrey); ring1.rotation.x = Math.PI/2; ring1.position.set(0, camHeight, -0.35);
+        const ring2 = new THREE.Mesh(ringGeo, MATS.darkGrey); ring2.rotation.x = Math.PI/2; ring2.position.set(0, camHeight, -0.45);
+        group.add(ring1, ring2);
+        const servo = new THREE.Mesh(createRoundedBoxGeo(0.05, 0.08, 0.14, 0.01, 1), MATS.blackMetal); servo.position.set(-0.07, camHeight, -0.4); group.add(servo);
+        
+        const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.01, 32), MATS.lensCoating); glass.rotation.x = Math.PI/2; glass.position.set(0, camHeight, -0.50); group.add(glass);
+
+        const hoodCollar = new THREE.Mesh(new THREE.CylinderGeometry(0.072, 0.072, 0.02, 32), MATS.blackMetal); hoodCollar.rotation.x = Math.PI/2; hoodCollar.position.set(0, camHeight, -0.505); group.add(hoodCollar);
+        const hoodShadeMat = new THREE.MeshStandardMaterial({ color: 0x080808, roughness: 0.85, metalness: 0.1, side: THREE.DoubleSide });
+        const flapTop = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.09), hoodShadeMat); flapTop.position.set(0, camHeight + 0.095, -0.55); flapTop.rotation.x = -Math.PI / 2 + 0.35; group.add(flapTop);
+        const flapBot = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.09), hoodShadeMat); flapBot.position.set(0, camHeight - 0.095, -0.55); flapBot.rotation.x = Math.PI / 2 - 0.35; group.add(flapBot);
+        const flapLeft = new THREE.Mesh(new THREE.PlaneGeometry(0.09, 0.16), hoodShadeMat); flapLeft.position.set(-0.115, camHeight, -0.55); flapLeft.rotation.y = -Math.PI / 2 - 0.35; group.add(flapLeft);
+        const flapRight = new THREE.Mesh(new THREE.PlaneGeometry(0.09, 0.16), hoodShadeMat); flapRight.position.set(0.115, camHeight, -0.55); flapRight.rotation.y = Math.PI / 2 + 0.35; group.add(flapRight);
+
+        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.25), MATS.blackMetal); handle.position.set(0, camHeight + 0.125, 0); group.add(handle);
+        const vfArm = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.1), MATS.metal); vfArm.rotation.z = Math.PI/2; vfArm.position.set(-0.04, camHeight + 0.16, -0.05); group.add(vfArm);
+        const vfBody = new THREE.Mesh(createRoundedBoxGeo(0.24, 0.16, 0.08, 0.01, 2), MATS.blackMetal); vfBody.position.set(-0.12, camHeight + 0.2, -0.05); group.add(vfBody);
+        
+        let vfMaterial = MATS.screenVF;
+        if (VF_PIPELINES[id]) { vfMaterial = new THREE.MeshBasicMaterial({ map: VF_PIPELINES[id].texture }); }
+        const vfScreen = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.14), vfMaterial); vfScreen.position.set(-0.12, camHeight + 0.2, -0.009); group.add(vfScreen);
+        if (VF_PIPELINES[id]) { VF_PIPELINES[id].meshRef = vfScreen; }
+        
+        const hoodMat = new THREE.MeshStandardMaterial({color: 0x050505, side: THREE.DoubleSide});
+        const hoodTop = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.1), hoodMat); hoodTop.position.set(-0.12, camHeight + 0.28, 0.04); hoodTop.rotation.x = Math.PI/2;
+        const hoodL = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.16), hoodMat); hoodL.position.set(-0.24, camHeight + 0.2, 0.04); hoodL.rotation.y = Math.PI/2;
+        const hoodR = new THREE.Mesh(new THREE.PlaneGeometry(0.1, 0.16), hoodMat); hoodR.position.set(0, camHeight + 0.2, 0.04); hoodR.rotation.y = Math.PI/2;
+        group.add(hoodTop, hoodL, hoodR);
+
+        const tallyMat = MATS.redLight.clone();
+        const tally = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 0.02), tallyMat); tally.position.set(-0.12, camHeight + 0.29, -0.09); group.add(tally);
+        TALLY_LAMPS.set(id, tally);
+
+        group.position.set(x, y, z);
+        group.rotation.y = rotY;
+        scene.add(createInteractiveObject(group, id));
+    }
+
+    function buildPresenterDesk() {
+        const group = new THREE.Group();
+        const deskShape = new THREE.Shape();
+        deskShape.moveTo(-1.2, 0.5); deskShape.lineTo(1.2, 0.5); deskShape.lineTo(1.0, -0.5);
+        deskShape.quadraticCurveTo(0, -0.8, -1.0, -0.5); deskShape.lineTo(-1.2, 0.5);
+        const deskGeo = new THREE.ExtrudeGeometry(deskShape, { depth: 0.75, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02 });
+        const desk = new THREE.Mesh(deskGeo, MATS.lightGrey); desk.rotation.x = Math.PI / 2; desk.position.set(0, 0.75, 0); desk.castShadow = true; desk.receiveShadow = true; group.add(desk);
+        
+        const topGeo = new THREE.ExtrudeGeometry(deskShape, { depth: 0.02, bevelEnabled: false });
+        const top = new THREE.Mesh(topGeo, MATS.wood); top.rotation.x = Math.PI / 2; top.position.set(0, 0.76, 0); group.add(top);
+
+        const bdGeo = new THREE.BoxGeometry(4, 2.5, 0.1);
+        const bd = new THREE.Mesh(bdGeo, MATS.darkGrey); bd.position.set(0, 1.25, 2.5); group.add(bd);
+        
+        const screenGeo = new THREE.PlaneGeometry(3.8, 2.0);
+        const screenTex = createCanvasTexture((ctx, w, h) => {
+            const grad = ctx.createLinearGradient(0,0,0,h); grad.addColorStop(0, '#06b6d4'); grad.addColorStop(1, '#0f172a');
+            ctx.fillStyle = grad; ctx.fillRect(0,0,w,h);
+            ctx.fillStyle = 'rgba(255,255,255,0.1)'; for(let i=0; i<w; i+=40) { ctx.fillRect(i, 0, 1, h); }
+            ctx.fillStyle = '#ffffff'; ctx.font = 'bold 80px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('BUDI LUHUR NEWS', w/2, h/2);
+        }, 1024, 512);
+        const screenMat = new THREE.MeshStandardMaterial({map: screenTex, emissiveMap: screenTex, emissive: 0xffffff, emissiveIntensity: 0.5});
+        const screen = new THREE.Mesh(screenGeo, screenMat); screen.position.set(0, 1.3, 2.44); screen.rotation.y = Math.PI; group.add(screen);
+
+        const layer2Group = new THREE.Group();
+        layer2Group.position.set(0, 0, 3.25);
+        const l2WallGeo = new THREE.BoxGeometry(6.8, 3.3, 0.12);
+        const l2WallMat = new THREE.MeshStandardMaterial({ color: 0x080c14, roughness: 0.7, metalness: 0.2 });
+        const l2Wall = new THREE.Mesh(l2WallGeo, l2WallMat); l2Wall.position.set(0, 1.65, 0); l2Wall.receiveShadow = true; layer2Group.add(l2Wall);
+
+        const l2Tex = createCanvasTexture((ctx, w, h) => {
+            const bgGrad = ctx.createRadialGradient(w / 2, h / 2, 80, w / 2, h / 2, w / 1.4);
+            bgGrad.addColorStop(0, '#0c2238'); bgGrad.addColorStop(0.5, '#071526'); bgGrad.addColorStop(1, '#030710');
+            ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, w, h);
+            ctx.strokeStyle = 'rgba(6, 182, 212, 0.15)'; ctx.lineWidth = 1.5;
+            for (let x = 0; x <= w; x += 32) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+            for (let y = 0; y <= h; y += 32) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)'; ctx.lineWidth = 2.5;
+            for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.moveTo(0, h * 0.3 + i * 25); ctx.bezierCurveTo(w * 0.25, h * 0.15 + i * 30, w * 0.75, h * 0.45 + i * 30, w, h * 0.3 + i * 25); ctx.stroke(); }
+            ctx.fillStyle = 'rgba(56, 189, 248, 0.45)';
+            for (let r = 0; r < 20; r++) {
+                for (let c = 0; c < 50; c++) {
+                    const cx = (c / 50) * w; const cy = h * 0.18 + (r / 20) * (h * 0.65);
+                    if (Math.sin(c * 0.22) * Math.cos(r * 0.28) > -0.15) { ctx.beginPath(); ctx.arc(cx, cy, 2.2, 0, Math.PI * 2); ctx.fill(); }
+                }
+            }
+            const neonGrad = ctx.createLinearGradient(0, 0, w, 0);
+            neonGrad.addColorStop(0, 'rgba(6, 182, 212, 0.1)'); neonGrad.addColorStop(0.5, 'rgba(6, 182, 212, 0.85)'); neonGrad.addColorStop(1, 'rgba(6, 182, 212, 0.1)');
+            ctx.fillStyle = neonGrad; ctx.fillRect(0, 15, w, 6); ctx.fillRect(0, h - 21, w, 6);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)'; ctx.font = 'bold 26px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('BUDI LUHUR BROADCAST NETWORK • STUDIO 1', w / 2, 58);
+        }, 1024, 512);
+
+        const l2ScreenMat = new THREE.MeshStandardMaterial({ map: l2Tex, emissiveMap: l2Tex, emissive: 0xffffff, emissiveIntensity: 0.42, roughness: 0.4, metalness: 0.1 });
+        const l2ScreenMesh = new THREE.Mesh(new THREE.PlaneGeometry(6.6, 3.1), l2ScreenMat); l2ScreenMesh.position.set(0, 1.65, -0.065); l2ScreenMesh.rotation.y = Math.PI; layer2Group.add(l2ScreenMesh);
+        const stripMat = new THREE.MeshStandardMaterial({ color: 0x06b6d4, emissive: 0x06b6d4, emissiveIntensity: 1.2 });
+        const topStrip = new THREE.Mesh(new THREE.BoxGeometry(6.7, 0.05, 0.04), stripMat); topStrip.position.set(0, 3.22, -0.07);
+        const botStrip = new THREE.Mesh(new THREE.BoxGeometry(6.7, 0.05, 0.04), stripMat); botStrip.position.set(0, 0.08, -0.07);
+        layer2Group.add(topStrip, botStrip);
+        const finMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5, metalness: 0.5 });
+        [-3.42, 3.42].forEach(posX => {
+            const fin = new THREE.Mesh(new THREE.BoxGeometry(0.18, 3.4, 0.28), finMat); fin.position.set(posX, 1.65, 0.02); fin.castShadow = true; layer2Group.add(fin);
+            const finGlow = new THREE.Mesh(new THREE.BoxGeometry(0.04, 3.3, 0.04), stripMat); finGlow.position.set(posX + (posX < 0 ? 0.08 : -0.08), 1.65, -0.08); layer2Group.add(finGlow);
+        });
+        group.add(layer2Group);
+
+        const skinMat = new THREE.MeshStandardMaterial({ color: 0xf6c8a4, roughness: 0.6, metalness: 0.05 });
+        const suitNavyMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.75, metalness: 0.1 });
+        const suitMaroonMat = new THREE.MeshStandardMaterial({ color: 0x881337, roughness: 0.75, metalness: 0.1 });
+        const whiteShirtMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.6, metalness: 0.05 });
+        const tieRedMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.4, metalness: 0.2 });
+        const hairDarkMat = new THREE.MeshStandardMaterial({ color: 0x1c1917, roughness: 0.9, metalness: 0.05 });
+        const hairBrownMat = new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.85, metalness: 0.05 });
+        const chairMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.5, metalness: 0.6 });
+
+        function createAnchor(x, z, rotY, isMale) {
+            const anchor = new THREE.Group(); anchor.position.set(x, 0, z); anchor.rotation.y = rotY;
+            const chairBase = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.28, 0.06, 16), MATS.blackMetal); chairBase.position.set(0, 0.03, 0.22); anchor.add(chairBase);
+            const chairPole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.45, 12), MATS.metal); chairPole.position.set(0, 0.25, 0.22); anchor.add(chairPole);
+            const chairSeat = new THREE.Mesh(createRoundedBoxGeo(0.48, 0.08, 0.46, 0.02, 2), chairMat); chairSeat.position.set(0, 0.5, 0.2); anchor.add(chairSeat);
+            const chairBack = new THREE.Mesh(createRoundedBoxGeo(0.46, 0.58, 0.06, 0.02, 2), chairMat); chairBack.position.set(0, 0.82, 0.42); chairBack.rotation.x = -0.05; anchor.add(chairBack);
+
+            const torsoMat = isMale ? suitNavyMat : suitMaroonMat;
+            const torso = new THREE.Mesh(createRoundedBoxGeo(0.44, 0.52, 0.28, 0.03, 2), torsoMat); torso.position.set(0, 0.78, 0.1); torso.castShadow = true; anchor.add(torso);
+            const shirtIn = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.32), whiteShirtMat); shirtIn.position.set(0, 0.84, -0.042); shirtIn.rotation.y = Math.PI; anchor.add(shirtIn);
+            if (isMale) {
+                const tie = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.24, 0.015), tieRedMat); tie.position.set(0, 0.8, -0.048); anchor.add(tie);
+            } else {
+                const brooch = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.01, 12), MATS.metal); brooch.rotation.x = Math.PI / 2; brooch.position.set(0.08, 0.9, -0.045); anchor.add(brooch);
+            }
+            const lavMic = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.02, 0.015), MATS.blackMatte); lavMic.position.set(-0.06, 0.9, -0.05); anchor.add(lavMic);
+            const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.065, 0.1, 16), skinMat); neck.position.set(0, 1.08, 0.08); anchor.add(neck);
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.13, 24, 20), skinMat); head.position.set(0, 1.22, 0.07); head.scale.set(1.0, 1.15, 1.05); head.castShadow = true; anchor.add(head);
+
+            if (isMale) {
+                const hair = new THREE.Mesh(new THREE.SphereGeometry(0.135, 18, 16, 0, Math.PI * 2, 0, Math.PI * 0.65), hairDarkMat); hair.position.set(0, 1.26, 0.07); anchor.add(hair);
+                const earpiece = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.02, 8), MATS.whiteLight); earpiece.rotation.z = Math.PI / 2; earpiece.position.set(0.135, 1.22, 0.06); anchor.add(earpiece);
+            } else {
+                const hairW = new THREE.Mesh(new THREE.SphereGeometry(0.145, 20, 18), hairBrownMat); hairW.position.set(0, 1.25, 0.08); hairW.scale.set(1.05, 1.1, 1.15); anchor.add(hairW);
+                const hairSideL = new THREE.Mesh(createRoundedBoxGeo(0.04, 0.22, 0.08, 0.01, 1), hairBrownMat); hairSideL.position.set(-0.13, 1.14, 0.06);
+                const hairSideR = new THREE.Mesh(createRoundedBoxGeo(0.04, 0.22, 0.08, 0.01, 1), hairBrownMat); hairSideR.position.set(0.13, 1.14, 0.06); anchor.add(hairSideL, hairSideR);
+            }
+
+            const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.05, 0.32, 12), torsoMat); armL.position.set(-0.25, 0.8, 0.02); armL.rotation.z = 0.45; armL.rotation.x = -0.55; anchor.add(armL);
+            const armR = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.05, 0.32, 12), torsoMat); armR.position.set(0.25, 0.8, 0.02); armR.rotation.z = -0.45; armR.rotation.x = -0.55; anchor.add(armR);
+            const handL = new THREE.Mesh(createRoundedBoxGeo(0.07, 0.03, 0.1, 0.01, 1), skinMat); handL.position.set(-0.18, 0.77, -0.22); handL.rotation.y = 0.2;
+            const handR = new THREE.Mesh(createRoundedBoxGeo(0.07, 0.03, 0.1, 0.01, 1), skinMat); handR.position.set(0.18, 0.77, -0.22); handR.rotation.y = -0.2; anchor.add(handL, handR);
+
+            if (isMale) {
+                const tablet = new THREE.Mesh(createRoundedBoxGeo(0.2, 0.01, 0.14, 0.005, 1), MATS.blackMetal); tablet.position.set(0, 0.775, -0.22); tablet.rotation.x = -0.15;
+                const tabScreen = new THREE.Mesh(new THREE.PlaneGeometry(0.18, 0.12), MATS.whiteLight); tabScreen.rotation.x = -Math.PI / 2 - 0.15; tabScreen.position.set(0, 0.783, -0.22); anchor.add(tablet, tabScreen);
+            } else {
+                const doc = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.005, 0.14), whiteShirtMat); doc.position.set(0, 0.775, -0.22); doc.rotation.y = 0.12; anchor.add(doc);
+            }
+            return anchor;
+        }
+
+        const anchorHost = createAnchor(-0.48, 0.46, 0.1, true);
+        const anchorCoHost = createAnchor(0.48, 0.46, -0.1, false);
+        group.add(anchorHost, anchorCoHost);
+        group.position.set(0, 0, 0);
+        scene.add(createInteractiveObject(group, 'desk'));
+    }
+
+    function buildSwitcher(x, y, z, rotY = 0) {
+        const group = new THREE.Group(); const w = 0.9; const d = 0.5; const h = 0.08;
+        const slantGroup = new THREE.Group();
+        const base = new THREE.Mesh(createRoundedBoxGeo(w, h, d, 0.01, 2), MATS.blackMetal); slantGroup.add(base);
+        const faceplate = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.02, d - 0.02), MATS.switcherFace); faceplate.rotation.x = -Math.PI / 2; faceplate.position.set(0, h/2 + 0.002, 0); slantGroup.add(faceplate);
+        
+        for(let col=0; col<10; col++) {
+            const isRed = (col === 2); const btn = new THREE.Mesh(createRoundedBoxGeo(0.04, 0.015, 0.03, 0.005, 1), isRed ? MATS.redLight : MATS.lightGrey); btn.position.set(-0.35 + col * 0.06, h/2 + 0.005, 0.01); slantGroup.add(btn);
+        }
+        for(let col=0; col<10; col++) {
+            const isGrn = (col === 4); const btn = new THREE.Mesh(createRoundedBoxGeo(0.04, 0.015, 0.03, 0.005, 1), isGrn ? MATS.greenLight : MATS.lightGrey); btn.position.set(-0.35 + col * 0.06, h/2 + 0.005, 0.13); slantGroup.add(btn);
+        }
+
+        const cutBtn = new THREE.Mesh(createRoundedBoxGeo(0.05, 0.015, 0.04, 0.005, 1), MATS.whiteLight); cutBtn.position.set(0.22, h/2 + 0.005, 0.1); slantGroup.add(cutBtn);
+        const autoBtn = new THREE.Mesh(createRoundedBoxGeo(0.05, 0.015, 0.04, 0.005, 1), MATS.redLight); autoBtn.position.set(0.3, h/2 + 0.005, 0.1); slantGroup.add(autoBtn);
+        const tbarSlot = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.01, 0.1), MATS.blackMatte); tbarSlot.position.set(0.38, h/2 + 0.006, 0.02); slantGroup.add(tbarSlot);
+        const tbarArm = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.08), MATS.metal); tbarArm.position.set(0.38, h/2 + 0.03, 0); tbarArm.rotation.x = Math.PI / 4; slantGroup.add(tbarArm);
+        const tbarHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.06), MATS.blackMatte); tbarHandle.position.set(0.38, h/2 + 0.06, -0.03); tbarHandle.rotation.z = Math.PI / 2; slantGroup.add(tbarHandle);
+
+        slantGroup.rotation.x = 0.15; slantGroup.position.set(0, h/2, 0); group.add(slantGroup);
+        group.position.set(x, y, z); group.rotation.y = rotY; scene.add(createInteractiveObject(group, 'switcher'));
+    }
+
+    function buildAudioMixer(x, y, z, rotY = 0) {
+        const group = new THREE.Group(); const w = 0.8; const d = 0.6; const h = 0.08;
+        const slantGroup = new THREE.Group();
+        const baseGeo = createRoundedBoxGeo(w, h, d, 0.015, 2); const base = new THREE.Mesh(baseGeo, MATS.blackMetal); base.castShadow = true; slantGroup.add(base);
+        const faceplate = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.02, d - 0.02), MATS.mixerFace); faceplate.rotation.x = -Math.PI / 2; faceplate.position.set(0, h/2 + 0.002, 0); slantGroup.add(faceplate);
+
+        const numCh = 8;
+        for(let i=0; i<numCh; i++) {
+            const px = -0.32 + (i * 0.07);
+            const track = new THREE.Mesh(new THREE.PlaneGeometry(0.005, 0.15), MATS.blackMatte); track.position.set(px, h/2 + 0.003, 0.15); track.rotation.x = -Math.PI/2; slantGroup.add(track);
+            const faderPos = 0.15 + (Math.random() * 0.06 - 0.03);
+            const fader = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.025, 0.03), MATS.lightGrey); fader.position.set(px, h/2 + 0.012, faderPos); slantGroup.add(fader);
+            for(let j=0; j<4; j++) {
+                const kMat = j === 0 ? MATS.darkGrey : MATS.blackMatte;
+                const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.02, 16), kMat); knob.position.set(px, h/2 + 0.01, -0.18 + (j * 0.07));
+                const kLine = new THREE.Mesh(new THREE.BoxGeometry(0.002, 0.022, 0.01), MATS.lightGrey); kLine.position.set(0, 0, -0.005); knob.add(kLine); knob.rotation.y = (Math.random() * 2 - 1) * 2; slantGroup.add(knob);
+            }
+        }
+        const mTrack = new THREE.Mesh(new THREE.PlaneGeometry(0.005, 0.15), MATS.blackMatte); mTrack.position.set(0.29, h/2 + 0.003, 0.15); mTrack.rotation.x = -Math.PI/2; slantGroup.add(mTrack);
+        const mFader = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.025, 0.035), MATS.redLight); mFader.position.set(0.29, h/2 + 0.012, 0.15); slantGroup.add(mFader);
+
+        slantGroup.rotation.x = 0.15; slantGroup.position.set(0, h/2, 0); group.add(slantGroup); group.position.set(x, y, z); group.rotation.y = rotY; scene.add(createInteractiveObject(group, 'audiomixer'));
+    }
+
+    function buildMultiview(x, y, z, rotY = 0) {
+        const group = new THREE.Group();
+        const frameGeo = createRoundedBoxGeo(3.0, 1.7, 0.05, 0.02, 2); const frame = new THREE.Mesh(frameGeo, MATS.blackMetal); group.add(frame);
+        const screen = new THREE.Mesh(new THREE.PlaneGeometry(2.95, 1.65), MATS.screenMultiview); screen.position.set(0, 0, 0.026); group.add(screen);
+        group.position.set(x, y, z); group.rotation.y = rotY; scene.add(createInteractiveObject(group, 'multiview'));
+    }
+
+    function buildRack(x, y, z, rotY = 0) {
+        const group = new THREE.Group(); const frameMat = MATS.darkGrey; const th = 0.05; const w = 0.6, h = 2.0, d = 0.8;
+        const pL = new THREE.Mesh(new THREE.BoxGeometry(th, h, d), frameMat); pL.position.set(-w/2, h/2, 0); pL.castShadow = true;
+        const pR = new THREE.Mesh(new THREE.BoxGeometry(th, h, d), frameMat); pR.position.set(w/2, h/2, 0); pR.castShadow = true;
+        const pT = new THREE.Mesh(new THREE.BoxGeometry(w, th, d), frameMat); pT.position.set(0, h, 0);
+        const pB = new THREE.Mesh(new THREE.BoxGeometry(w, th, d), frameMat); pB.position.set(0, 0, 0);
+        group.add(pL, pR, pT, pB);
+        for(let i=0.2; i<1.8; i+=0.15) {
+            if(Math.random() > 0.2) {
+                const uMat = Math.random() > 0.5 ? MATS.blackMatte : MATS.lightGrey; const unit = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.12, 0.7), uMat); unit.position.set(0, i, 0); group.add(unit);
+                for(let led=0; led<3; led++) { const l = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.01, 0.01), MATS.greenLight); l.position.set(-0.2 + led*0.04, i, -0.355); group.add(l); }
+            }
+        }
+        group.position.set(x, y, z); group.rotation.y = rotY; scene.add(createInteractiveObject(group, 'rack'));
+    }
+
+    function buildLightingRig(y) {
+        const group = new THREE.Group(); const gridMat = MATS.blackMetal;
+        for(let i=-3; i<=3; i+=1.5) {
+            const pipeX = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 8), gridMat); pipeX.position.set(0, y, i); pipeX.rotation.z = Math.PI/2; group.add(pipeX);
+            const pipeZ = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 6), gridMat); pipeZ.position.set(i, y, 0); pipeZ.rotation.x = Math.PI/2; group.add(pipeZ);
+        }
+
+        const lightPos = [[-2, -1], [2, -1], [0, 2]];
+        lightPos.forEach(pos => {
+            const lGrp = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.2, 16), MATS.darkGrey); body.rotation.x = Math.PI/2; lGrp.add(body);
+            const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.02, 16), MATS.whiteLight); lens.rotation.x = Math.PI/2; lens.position.set(0, 0, 0.1); lGrp.add(lens);
+            const bdGeo = new THREE.PlaneGeometry(0.1, 0.15); const bdMat = new THREE.MeshStandardMaterial({color:0x000, side:THREE.DoubleSide});
+            const bd1 = new THREE.Mesh(bdGeo, bdMat); bd1.position.set(-0.15, 0, 0.15); bd1.rotation.y = -Math.PI/4; lGrp.add(bd1);
+            const bd2 = new THREE.Mesh(bdGeo, bdMat); bd2.position.set(0.15, 0, 0.15); bd2.rotation.y = Math.PI/4; lGrp.add(bd2);
+            const yoke = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.01, 8, 16, Math.PI), MATS.metal); yoke.position.set(0, -0.15, 0); lGrp.add(yoke);
+            const clamp = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.05), MATS.metal); clamp.position.set(0, -0.25, 0); lGrp.add(clamp);
+
+            lGrp.position.set(pos[0], y - 0.3, pos[1]); lGrp.rotation.x = Math.PI / 2; group.add(lGrp);
+
+            const spotLight = new THREE.SpotLight(0xfff0dd, 1.5);
+            spotLight.position.set(pos[0], y - 0.3, pos[1]); spotLight.target.position.set(pos[0], 0, pos[1]);
+            spotLight.angle = Math.PI/3; spotLight.penumbra = 0.6; spotLight.castShadow = true; spotLight.shadow.bias = -0.001;
+            scene.add(spotLight); scene.add(spotLight.target); LIGHTING_SPOTS.push(spotLight);
+        });
+
+        scene.add(createInteractiveObject(group, 'lightrig'));
+    }
+
+    function buildMic(x, y, z) {
+        const group = new THREE.Group();
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.18, 0.04, 32), MATS.blackMatte); base.position.set(0, 0.02, 0); base.castShadow = true; group.add(base);
+        const baseDome = new THREE.Mesh(new THREE.SphereGeometry(0.15, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), MATS.blackMetal); baseDome.scale.set(1, 0.2, 1); baseDome.position.set(0, 0.04, 0); group.add(baseDome);
+        const poleBottom = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.8), MATS.blackMetal); poleBottom.position.set(0, 0.44, 0); group.add(poleBottom);
+        const clutch = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.05, 16), MATS.darkGrey); clutch.position.set(0, 0.84, 0); group.add(clutch);
+        const poleTop = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.6), MATS.metal); poleTop.position.set(0, 1.14, 0); group.add(poleTop);
+        
+        const pivotGroup = new THREE.Group();
+        pivotGroup.position.set(0, 1.44, 0);
+        const pivotJoint = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.04, 16), MATS.blackMatte); pivotJoint.rotation.x = Math.PI / 2; pivotGroup.add(pivotJoint);
+        const armLength = 1.4;
+        const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, armLength), MATS.blackMetal); arm.rotation.z = Math.PI / 2; arm.position.set(armLength * 0.2, 0, 0); pivotGroup.add(arm);
+        const counterWeight = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.1, 16), MATS.blackMatte); counterWeight.rotation.z = Math.PI / 2; counterWeight.position.set(-armLength * 0.3, 0, 0); pivotGroup.add(counterWeight);
+
+        pivotGroup.rotation.y = 2.1; // Menghadap presisi ke meja anchor
+        pivotGroup.rotation.z = Math.PI / 7;
+        group.add(pivotGroup);
+
+        const micGroup = new THREE.Group();
+        micGroup.position.set(0.9, 0, 0);
+        micGroup.rotation.z = -0.65; // Menukik fokus ke anchor
+
+        const micBody = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.25, 16), MATS.blackMatte); micBody.rotation.z = Math.PI / 2; micBody.position.set(0, -0.04, 0); micGroup.add(micBody);
+        const micFront = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.15, 16), MATS.darkGrey); micFront.rotation.z = Math.PI / 2; micFront.position.set(0.05, -0.04, 0); micGroup.add(micFront);
+
+        pivotGroup.add(micGroup);
+        group.position.set(x, y, z);
+        scene.add(createInteractiveObject(group, 'mic'));
+    }
+
+    // ==========================================
+    // 7. ASSEMBLE SCENE
+    // ==========================================
+    buildStudioRoom();
+    const pcrTable = new THREE.Mesh(new THREE.BoxGeometry(4, 0.75, 1.5), MATS.darkGrey); pcrTable.position.set(0, 0.375, -6.5); scene.add(pcrTable);
+    
+    buildSwitcher(0.6, 0.75, -6.7, Math.PI);
+    buildAudioMixer(-0.6, 0.75, -6.7, Math.PI);
+    buildMultiview(0, 1.9, -5.25, Math.PI);
+    buildRack(-3.5, 0, -7, 0);
+    buildPresenterDesk();
+    
+    buildCamera(0, 0, -2.5, Math.PI, 'cam1'); 
+    buildCamera(-2.2, 0, -1.5, Math.PI - 0.35 + (60 * Math.PI / 180) + (30 * Math.PI / 180), 'cam2'); 
+    buildCamera(2.2, 0, -1.5, (Math.PI / 2) + (30 * Math.PI / 180) + (30 * Math.PI / 180), 'cam3'); 
+
+    buildMic(1.1, 0, -2.0); 
+    buildLightingRig(4.5);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+    const pcrLight = new THREE.PointLight(0xffffff, 0.35, 6); pcrLight.position.set(0, 3, -6.5); scene.add(pcrLight);
+
+    document.getElementById('loading').style.opacity = '0';
+    setTimeout(() => document.getElementById('loading').style.display = 'none', 500);
+
+    // ==========================================
+    // 8. SIMULATION ENGINE SYNCHRONIZATION
+    // ==========================================
+    function updateSimulationVisuals() {
+        const pgm = SIM_CONFIG.switcher.programBus;
+        const pvw = SIM_CONFIG.switcher.previewBus;
+
+        ['cam1', 'cam2', 'cam3'].forEach(camId => {
+            const lamp = TALLY_LAMPS.get(camId);
+            if (lamp) {
+                const isPowerOn = SIM_CONFIG[camId]?.power !== false;
+                if (!isPowerOn) { lamp.material.color.setHex(0x222222); lamp.material.emissive.setHex(0x000000); lamp.material.emissiveIntensity = 0; }
+                else if (pgm === camId) { lamp.material.color.setHex(0xff0000); lamp.material.emissive.setHex(0xff0000); lamp.material.emissiveIntensity = 2.5; }
+                else if (pvw === camId) { lamp.material.color.setHex(0x00ff00); lamp.material.emissive.setHex(0x00ff00); lamp.material.emissiveIntensity = 1.8; }
+                else { lamp.material.color.setHex(0x333333); lamp.material.emissive.setHex(0x000000); lamp.material.emissiveIntensity = 0; }
+            }
+        });
+
+        const hudPgm = document.getElementById('hud-pgm-name');
+        const hudPvw = document.getElementById('hud-pvw-name');
+        const hudAudio = document.getElementById('hud-audio-level');
+        if (hudPgm) hudPgm.innerText = (pgm || 'CAM 1').toUpperCase();
+        if (hudPvw) hudPvw.innerText = (pvw || 'CAM 2').toUpperCase();
+        if (hudAudio) {
+            const masterVal = SIM_CONFIG.audiomixer?.masterFader ?? 0;
+            hudAudio.innerText = (masterVal > 0 ? `+${masterVal}` : masterVal) + ' dB';
+        }
+
+        const isLightOn = SIM_CONFIG.lightrig?.power !== false;
+        const dimmerFactor = (SIM_CONFIG.lightrig?.dimmer ?? 85) / 100;
+        LIGHTING_SPOTS.forEach(spot => { spot.intensity = isLightOn ? dimmerFactor * 1.8 : 0; });
+    }
+    updateSimulationVisuals();
+
+    // ==========================================
+    // 9. DYNAMIC CONTROL GENERATOR & HANDLERS
+    // ==========================================
+    window.updateDeviceSetting = function(devId, ctrlId, value) {
+        if (!SIM_CONFIG[devId]) SIM_CONFIG[devId] = {};
+        SIM_CONFIG[devId][ctrlId] = value;
+
+        if (devId === 'switcher') {
+            if (ctrlId === 'programBus' && SIM_CONFIG.switcher.previewBus === value) {
+                SIM_CONFIG.switcher.previewBus = (value === 'cam1') ? 'cam2' : 'cam1';
+            }
+            const mode = SIM_CONFIG.switcher.autoViewMode || 'DIRECTOR_CUT';
+            if (mode !== 'MANUAL (Bebas/Tetap di Posisi Saat Ini)') {
+                if (ctrlId === 'programBus') {
+                    if (mode.startsWith('DIRECTOR_CUT')) {
+                        const camPosViews = {
+                            'cam1': { cam: new THREE.Vector3(0, 1.36, -3.15), target: new THREE.Vector3(0, 1.25, 0.0) },
+                            'cam2': { cam: new THREE.Vector3(-2.55, 1.38, -2.3), target: new THREE.Vector3(-1.4, 1.25, 0.0) },
+                            'cam3': { cam: new THREE.Vector3(2.55, 1.38, -2.3), target: new THREE.Vector3(1.4, 1.25, 0.0) }
+                        };
+                        const targetView = camPosViews[value];
+                        if (targetView) startCameraAnimation(targetView.cam, targetView.target);
+                    } else if (mode.startsWith('MULTIVIEW_FOCUS')) {
+                        startCameraAnimation(new THREE.Vector3(0, 1.9, -7.8), new THREE.Vector3(0, 1.9, -5.25));
+                    } else if (mode.startsWith('OPERATOR_OVERVIEW')) {
+                        startCameraAnimation(new THREE.Vector3(0.3, 1.75, -7.6), new THREE.Vector3(0.1, 1.35, -5.8));
+                    }
+                } else if (ctrlId === 'previewBus' && mode.startsWith('MULTIVIEW_FOCUS')) {
+                    startCameraAnimation(new THREE.Vector3(0, 1.9, -7.8), new THREE.Vector3(0, 1.9, -5.25));
+                }
+            }
+        }
+
+        updateSimulationVisuals();
+        if (STATE.selectedObject?.userData?.id === devId) { renderOperationalControls(devId); }
+    };
+
+    function renderOperationalControls(id) {
+        const container = document.getElementById('dynamic-controls'); container.innerHTML = '';
+        const eqData = EQUIPMENT_REGISTRY[id];
+        if (!eqData || !eqData.controls) { container.innerHTML = '<div class="text-slate-400 text-xs italic">Tidak ada kontrol parameter aktif untuk objek ini.</div>'; return; }
+        const devState = SIM_CONFIG[id] || {};
+
+        eqData.controls.forEach(ctrl => {
+            const val = devState[ctrl.id];
+            const div = document.createElement('div'); div.className = 'bg-slate-800/80 p-3 rounded-lg border border-slate-700/80';
+            const labelRow = document.createElement('div'); labelRow.className = 'flex justify-between items-center mb-1.5';
+            const labelText = document.createElement('label'); labelText.className = 'font-semibold text-slate-200 text-xs'; labelText.innerText = ctrl.label; labelRow.appendChild(labelText);
+            if (ctrl.type === 'slider') {
+                const badge = document.createElement('span'); badge.className = 'text-cyan-400 font-mono font-bold text-xs'; badge.innerText = `${val ?? 0} ${ctrl.unit || ''}`; labelRow.appendChild(badge);
+            }
+            div.appendChild(labelRow);
+
+            if (ctrl.type === 'toggle') {
+                const btn = document.createElement('button'); const isOn = Boolean(val);
+                btn.className = `w-full py-2 rounded font-bold text-xs transition flex items-center justify-center gap-2 ${isOn ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-950' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`;
+                btn.innerHTML = isOn ? '<span>●</span> ACTIVE / POWER ON' : '<span>○</span> STANDBY / OFF';
+                btn.onclick = () => window.updateDeviceSetting(id, ctrl.id, !isOn); div.appendChild(btn);
+            } else if (ctrl.type === 'slider') {
+                const input = document.createElement('input'); input.type = 'range'; input.min = ctrl.min; input.max = ctrl.max; input.step = ctrl.step || 1; input.value = val ?? ctrl.min;
+                input.className = 'w-full accent-cyan-400 h-1.5 bg-slate-700 rounded cursor-pointer';
+                input.oninput = (e) => window.updateDeviceSetting(id, ctrl.id, parseFloat(e.target.value)); div.appendChild(input);
+            } else if (ctrl.type === 'select') {
+                const select = document.createElement('select'); select.className = 'w-full bg-slate-900 border border-slate-700 p-2 rounded text-slate-200 text-xs focus:border-cyan-400 focus:outline-none';
+                ctrl.options.forEach(opt => {
+                    const optEl = document.createElement('option'); optEl.value = opt; optEl.innerText = opt; if (opt === val) optEl.selected = true; select.appendChild(optEl);
+                });
+                select.onchange = (e) => window.updateDeviceSetting(id, ctrl.id, e.target.value); div.appendChild(select);
+            } else if (ctrl.type === 'radio') {
+                const radioGrid = document.createElement('div'); radioGrid.className = 'grid grid-cols-3 gap-2 mt-1';
+                ctrl.options.forEach(opt => {
+                    const isSelected = (val === opt.value); const optBtn = document.createElement('button'); const isProgram = ctrl.id === 'programBus';
+                    let bgClass = 'bg-slate-900 hover:bg-slate-750 text-slate-300 border border-slate-700';
+                    if (isSelected) { bgClass = isProgram ? 'bg-red-600 text-white border-red-500 font-bold shadow-md shadow-red-950' : 'bg-emerald-600 text-white border-emerald-500 font-bold shadow-md shadow-emerald-950'; }
+                    optBtn.className = `py-2 rounded text-xs transition border flex items-center justify-center gap-1.5 ${bgClass}`;
+                    optBtn.innerHTML = `${isSelected ? '<span>●</span>' : ''} ${opt.label}`;
+                    optBtn.onclick = () => window.updateDeviceSetting(id, ctrl.id, opt.value); radioGrid.appendChild(optBtn);
+                });
+                div.appendChild(radioGrid);
+            }
+            container.appendChild(div);
+        });
+    }
+
+    // ==========================================
+    // 10. INTERACTION, RAYCASTING & UI LOGIC
+    // ==========================================
+    const raycaster = new THREE.Raycaster(); const mouse = new THREE.Vector2(); const tooltip = document.getElementById('hover-tooltip');
+    let pointerDownPos = new THREE.Vector2();
+    window.addEventListener('pointerdown', (e) => { pointerDownPos.set(e.clientX, e.clientY); });
+    function setHighlight(object, isActive) {}
+
+    window.addEventListener('pointermove', (e) => {
+        if (e.target.tagName !== 'CANVAS') {
+            if (STATE.hoveredObject) { setHighlight(STATE.hoveredObject, false); STATE.hoveredObject = null; document.body.style.cursor = 'default'; tooltip.style.display = 'none'; }
+            return;
+        }
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1; mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(INTERACTIVE_OBJECTS, false);
+
+        if (intersects.length > 0) {
+            const hit = intersects[0].object;
+            if (STATE.hoveredObject !== hit) {
+                if (STATE.hoveredObject) setHighlight(STATE.hoveredObject, false);
+                STATE.hoveredObject = hit; setHighlight(STATE.hoveredObject, true); document.body.style.cursor = 'pointer';
+                const eqData = EQUIPMENT_REGISTRY[hit.userData.id];
+                if(eqData) { tooltip.innerText = eqData.name; tooltip.style.display = 'block'; }
+            }
+            tooltip.style.left = (e.clientX + 15) + 'px'; tooltip.style.top = (e.clientY + 15) + 'px';
+        } else {
+            if (STATE.hoveredObject) { setHighlight(STATE.hoveredObject, false); STATE.hoveredObject = null; document.body.style.cursor = 'default'; tooltip.style.display = 'none'; }
+        }
+    });
+
+    window.addEventListener('click', (e) => {
+        if (e.target.tagName !== 'CANVAS') return;
+        const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y); if (dist > 5) return;
+        if (STATE.hoveredObject) {
+            const id = STATE.hoveredObject.userData.id; const eqData = EQUIPMENT_REGISTRY[id];
+            if(eqData) {
+                STATE.selectedObject = STATE.hoveredObject; showInspector(id, eqData);
+                const objGroup = STATE.hoveredObject.parent; const box = new THREE.Box3().setFromObject(objGroup); const targetPos = new THREE.Vector3(); box.getCenter(targetPos);
+                
+                const customViews = {
+                    'cam1': { cam: new THREE.Vector3(0, 1.36, -3.15), target: new THREE.Vector3(0, 1.25, 0.0) },
+                    'cam2': { cam: new THREE.Vector3(-2.55, 1.38, -2.3), target: new THREE.Vector3(-1.4, 1.25, 0.0) },
+                    'cam3': { cam: new THREE.Vector3(2.55, 1.38, -2.3), target: new THREE.Vector3(1.4, 1.25, 0.0) },
+                    'switcher': { cam: new THREE.Vector3(0.6, 1.65, -6.95), target: new THREE.Vector3(0.6, 0.82, -6.7) },
+                    'audiomixer': { cam: new THREE.Vector3(-0.6, 1.65, -6.95), target: new THREE.Vector3(-0.6, 0.82, -6.7) },
+                    'multiview': { cam: new THREE.Vector3(0, 1.9, -7.8), target: new THREE.Vector3(0, 1.9, -5.25) },
+                    'rack': { cam: new THREE.Vector3(-3.5, 1.15, -8.6), target: new THREE.Vector3(-3.5, 1.15, -7.0) },
+                    'desk': { cam: new THREE.Vector3(0, 1.35, -1.35), target: new THREE.Vector3(0, 1.05, 1.0) },
+                    'mic': { cam: new THREE.Vector3(1.8, 1.6, -0.6), target: new THREE.Vector3(1.1, 1.1, -2.0) },
+                    'lightrig': { cam: new THREE.Vector3(0, 3.2, 3.0), target: new THREE.Vector3(0, 4.3, 0) }
+                };
+                let newCamPos, newTargetPos;
+                if (customViews[id]) { newCamPos = customViews[id].cam; newTargetPos = customViews[id].target; } else {
+                    const size = box.getSize(new THREE.Vector3()); const maxDim = Math.max(size.x, size.y, size.z, 0.5); const safeDist = maxDim * 2.2;
+                    newTargetPos = targetPos.clone(); newCamPos = targetPos.clone().add(new THREE.Vector3(safeDist * 0.7, safeDist * 0.6, safeDist));
+                }
+                startCameraAnimation(newCamPos, newTargetPos);
+            }
+        }
+    });
+
+    // ==========================================
+    // 11. INSPECTOR & TAB FUNCTIONS
+    // ==========================================
+    window.switchTab = function(tabName) {
+        STATE.currentTab = tabName;
+        ['operational', 'specs', 'sop'].forEach(t => {
+            const btn = document.getElementById(`tab-btn-${t}`); const content = document.getElementById(`tab-content-${t}`);
+            if (t === tabName) { btn.className = 'flex-1 py-2.5 text-center text-cyan-400 border-b-2 border-cyan-400 bg-slate-900/50 transition'; content.classList.remove('hidden'); } 
+            else { btn.className = 'flex-1 py-2.5 text-center text-slate-400 border-b-2 border-transparent hover:text-slate-200 transition'; content.classList.add('hidden'); }
+        });
+    };
+
+    window.showInspector = function(id, data) {
+        document.getElementById('inspector-panel').classList.remove('hidden'); document.getElementById('inspector-panel').classList.add('flex');
+        document.getElementById('ins-title').innerText = data.name; document.getElementById('ins-category-tag').innerText = data.category;
+        document.getElementById('ins-zone-label').innerText = data.zone; document.getElementById('ins-function').innerText = data.function; document.getElementById('ins-io').innerText = data.io;
+        
+        const ul = document.getElementById('ins-components'); ul.innerHTML = '';
+        data.components.forEach(c => { const li = document.createElement('li'); li.innerText = c; ul.appendChild(li); });
+
+        const sopUl = document.getElementById('ins-sop'); sopUl.innerHTML = '';
+        if (data.sop && data.sop.length > 0) { data.sop.forEach(s => { const li = document.createElement('li'); li.innerText = s; sopUl.appendChild(li); }); }
+
+        document.getElementById('ins-safety').innerText = data.safety || 'Gunakan selalu safety standard K3 penyiaran lab audio visual.';
+        renderOperationalControls(id);
+    };
+
+    window.closeInspector = function() {
+        document.getElementById('inspector-panel').classList.add('hidden'); document.getElementById('inspector-panel').classList.remove('flex');
+    };
+
+    window.flyToZone = function(zoneName) {
+        closeInspector();
+        const zone = ZONES[zoneName]; if(zone) { startCameraAnimation(zone.cam, zone.target); }
+    };
+    
+    window.resetCamera = function() { flyToZone('default'); };
+
+    function startCameraAnimation(newCamPos, newTargetPos) {
+        STATE.isAnimatingCam = true; STATE.animProgress = 0; STATE.camStartPos.copy(camera.position); STATE.camEndPos.copy(newCamPos);
+        STATE.targetStartPos.copy(controls.target); STATE.targetEndPos.copy(newTargetPos); controls.enabled = true;
+    }
+
+    function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ==========================================
+    // 12. ANIMATION LOOP
+    // ==========================================
+    let frameCounter = 0;
+
+    function renderCamViewfinder(camId) {
+        const pipe = VF_PIPELINES[camId]; if (!pipe || !pipe.meshRef) return;
+        const isCamOn = SIM_CONFIG[camId]?.power !== false;
+        if (!isCamOn) {
+            pipe.compCtx.fillStyle = '#050505'; pipe.compCtx.fillRect(0, 0, 512, 256); pipe.compCtx.fillStyle = '#444';
+            pipe.compCtx.font = 'bold 20px monospace'; pipe.compCtx.textAlign = 'center'; pipe.compCtx.fillText(`${camId.toUpperCase()} STANDBY / OFF`, 256, 128);
+            pipe.texture.needsUpdate = true; return;
+        }
+
+        pipe.meshRef.visible = false;
+        renderer.setRenderTarget(pipe.target); renderer.render(scene, pipe.camera); renderer.readRenderTargetPixels(pipe.target, 0, 0, 512, 256, pipe.pixelBuf); renderer.setRenderTarget(null);
+        pipe.meshRef.visible = true;
+
+        const rowBytes = 512 * 4;
+        for (let y = 0; y < 256; y++) {
+            const srcOffset = (255 - y) * rowBytes; const dstOffset = y * rowBytes;
+            pipe.feedImageData.data.set(pipe.pixelBuf.subarray(srcOffset, srcOffset + rowBytes), dstOffset);
+        }
+        pipe.feedCtx.putImageData(pipe.feedImageData, 0, 0);
+        pipe.compCtx.drawImage(pipe.feedCanvas, 0, 0);
+
+        pipe.compCtx.strokeStyle = 'rgba(255, 255, 255, 0.4)'; pipe.compCtx.lineWidth = 1.5; pipe.compCtx.strokeRect(51, 26, 410, 204); 
+        pipe.compCtx.beginPath(); pipe.compCtx.moveTo(256, 118); pipe.compCtx.lineTo(256, 138); pipe.compCtx.moveTo(246, 128); pipe.compCtx.lineTo(266, 128); pipe.compCtx.stroke();
+
+        const isPgm = (SIM_CONFIG.switcher?.programBus === camId); const isPvw = (SIM_CONFIG.switcher?.previewBus === camId);
+        if (isPgm) {
+            pipe.compCtx.fillStyle = 'rgba(239, 68, 68, 0.9)'; pipe.compCtx.fillRect(16, 12, 78, 24);
+            pipe.compCtx.fillStyle = '#ffffff'; pipe.compCtx.font = 'bold 14px monospace'; pipe.compCtx.textAlign = 'left'; pipe.compCtx.fillText('● ON AIR', 22, 29);
+        } else if (isPvw) {
+            pipe.compCtx.fillStyle = 'rgba(34, 197, 94, 0.9)'; pipe.compCtx.fillRect(16, 12, 78, 24);
+            pipe.compCtx.fillStyle = '#ffffff'; pipe.compCtx.font = 'bold 14px monospace'; pipe.compCtx.textAlign = 'left'; pipe.compCtx.fillText('PREVIEW', 24, 29);
+        } else {
+            pipe.compCtx.fillStyle = '#22c55e'; pipe.compCtx.font = 'bold 15px sans-serif'; pipe.compCtx.textAlign = 'left'; pipe.compCtx.fillText('● REC', 20, 28);
+        }
+
+        pipe.compCtx.fillStyle = '#38bdf8'; pipe.compCtx.font = 'bold 15px monospace'; pipe.compCtx.textAlign = 'right'; pipe.compCtx.fillText(camId.toUpperCase(), 370, 28);
+        pipe.compCtx.fillStyle = '#ffffff'; pipe.compCtx.font = 'bold 15px monospace'; pipe.compCtx.textAlign = 'right'; pipe.compCtx.fillText('TC 10:04:26:00', 492, 28);
+
+        const irisVal = SIM_CONFIG[camId]?.iris ?? 2.8; const shutterVal = SIM_CONFIG[camId]?.shutter ?? '1/50'; const gainVal = SIM_CONFIG[camId]?.gain ?? '0dB';
+        pipe.compCtx.font = '13px monospace'; pipe.compCtx.textAlign = 'left'; pipe.compCtx.fillText(`F${irisVal.toFixed(1)}  ${shutterVal}  GAIN ${gainVal}`, 20, 242);
+        pipe.compCtx.textAlign = 'right'; pipe.compCtx.fillText('BATT 14.4V  4K HDR', 492, 242);
+
+        pipe.texture.needsUpdate = true;
+    }
+
+    function renderMultiviewWall() {
+        const isMvOn = SIM_CONFIG.multiview?.power !== false;
+        if (!isMvOn) {
+            mvCtx.fillStyle = '#050505'; mvCtx.fillRect(0, 0, 1024, 512); mvCtx.fillStyle = '#333333';
+            mvCtx.font = 'bold 28px sans-serif'; mvCtx.textAlign = 'center'; mvCtx.fillText('MULTIVIEW DISPLAY STANDBY / POWER OFF', 512, 256);
+            mvTexture.needsUpdate = true; return;
+        }
+
+        const cols = 3; const rows = 2; const kw = 1024 / cols; const kh = 512 / rows;
+        const pgm = SIM_CONFIG.switcher?.programBus || 'cam1'; const pvw = SIM_CONFIG.switcher?.previewBus || 'cam2';
+        const hasDsk = SIM_CONFIG.switcher?.dsk1 === true; const hasFtb = SIM_CONFIG.switcher?.ftb === true;
+        const showAudioMeters = SIM_CONFIG.multiview?.audioMeters !== false; const showTally = SIM_CONFIG.multiview?.tallyOverlay !== false;
+
+        mvCtx.fillStyle = '#050505'; mvCtx.fillRect(0, 0, 1024, 512);
+
+        const slots = [
+            { col: 0, row: 0, label: 'CAM 1', camId: 'cam1' }, { col: 1, row: 0, label: 'CAM 2', camId: 'cam2' }, { col: 2, row: 0, label: 'CAM 3', camId: 'cam3' },
+            { col: 0, row: 1, label: 'GFX 1 / MEDIA', isGfx: true }, { col: 1, row: 1, label: `PREVIEW (${pvw.toUpperCase()})`, camId: pvw, isPvwSlot: true }, { col: 2, row: 1, label: `PROGRAM (${pgm.toUpperCase()})`, camId: pgm, isPgmSlot: true }
+        ];
+
+        slots.forEach(slot => {
+            const x = slot.col * kw; const y = slot.row * kh;
+
+            if (slot.isGfx) {
+                const grad = mvCtx.createLinearGradient(x, y, x + kw, y + kh);
+                grad.addColorStop(0, '#0f2027'); grad.addColorStop(0.5, '#203a43'); grad.addColorStop(1, '#2c5364');
+                mvCtx.fillStyle = grad; mvCtx.fillRect(x + 2, y + 2, kw - 4, kh - 4);
+                mvCtx.fillStyle = 'rgba(255,255,255,0.06)'; for (let i = 0; i < kh; i += 8) { mvCtx.fillRect(x, y + i, kw, 2); }
+                mvCtx.fillStyle = '#06b6d4'; mvCtx.font = 'bold 20px sans-serif'; mvCtx.textAlign = 'center'; mvCtx.fillText('BLVS GRAPHICS PLAYOUT', x + kw / 2, y + kh / 2 - 10);
+                mvCtx.fillStyle = '#94a3b8'; mvCtx.font = '13px monospace'; mvCtx.fillText('STATUS: DDR 1 READY | 1080p59.94', x + kw / 2, y + kh / 2 + 15);
+            } else if (slot.camId && VF_PIPELINES[slot.camId]) {
+                const pipe = VF_PIPELINES[slot.camId]; const isPowerOn = SIM_CONFIG[slot.camId]?.power !== false;
+                if (slot.isPgmSlot && hasFtb) {
+                    mvCtx.fillStyle = '#000000'; mvCtx.fillRect(x + 2, y + 2, kw - 4, kh - 4);
+                    mvCtx.fillStyle = '#ef4444'; mvCtx.font = 'bold 22px monospace'; mvCtx.textAlign = 'center'; mvCtx.fillText('FADE TO BLACK (FTB)', x + kw / 2, y + kh / 2);
+                } else if (isPowerOn && pipe.feedCanvas) {
+                    mvCtx.drawImage(pipe.feedCanvas, x + 2, y + 2, kw - 4, kh - 4);
+                    if (slot.isPgmSlot && hasDsk) {
+                        mvCtx.fillStyle = 'rgba(6, 182, 212, 0.9)'; mvCtx.fillRect(x + 20, y + kh - 50, kw - 40, 28);
+                        mvCtx.fillStyle = '#ffffff'; mvCtx.font = 'bold 13px sans-serif'; mvCtx.textAlign = 'left'; mvCtx.fillText('LIVE • SMK BUDI LUHUR NEWSCAST', x + 30, y + kh - 32);
+                    }
+                } else {
+                    mvCtx.fillStyle = '#0a0a0a'; mvCtx.fillRect(x + 2, y + 2, kw - 4, kh - 4);
+                    mvCtx.fillStyle = '#555555'; mvCtx.font = 'bold 16px monospace'; mvCtx.textAlign = 'center'; mvCtx.fillText(`${slot.camId.toUpperCase()} OFF`, x + kw / 2, y + kh / 2);
+                }
+            }
+
+            const isProgramLive = slot.isPgmSlot || (showTally && slot.camId === pgm && !slot.isPvwSlot);
+            const isPreviewPreset = slot.isPvwSlot || (showTally && slot.camId === pvw && !slot.isPgmSlot);
+
+            if (isProgramLive) { mvCtx.strokeStyle = '#ef4444'; mvCtx.lineWidth = 5; mvCtx.strokeRect(x + 2.5, y + 2.5, kw - 5, kh - 5); } 
+            else if (isPreviewPreset) { mvCtx.strokeStyle = '#22c55e'; mvCtx.lineWidth = 5; mvCtx.strokeRect(x + 2.5, y + 2.5, kw - 5, kh - 5); } 
+            else { mvCtx.strokeStyle = '#27272a'; mvCtx.lineWidth = 2; mvCtx.strokeRect(x + 1, y + 1, kw - 2, kh - 2); }
+
+            if (showAudioMeters && (slot.isPgmSlot || slot.isPvwSlot)) {
+                const meterX = x + kw - 20; const meterY = y + 20; const meterH = kh - 45;
+                const masterLevel = Math.max(0, Math.min(1, ((SIM_CONFIG.audiomixer?.masterFader ?? 0) + 60) / 70));
+                const jitter = (Math.sin(frameCounter * 0.15) * 0.1) + (Math.random() * 0.05);
+                const activeHeight = Math.max(0.1, Math.min(1.0, masterLevel + jitter)) * meterH;
+
+                mvCtx.fillStyle = 'rgba(0,0,0,0.7)'; mvCtx.fillRect(meterX - 2, meterY - 2, 14, meterH + 4);
+                const meterGrad = mvCtx.createLinearGradient(0, meterY + meterH, 0, meterY);
+                meterGrad.addColorStop(0, '#22c55e'); meterGrad.addColorStop(0.7, '#eab308'); meterGrad.addColorStop(1, '#ef4444');
+                mvCtx.fillStyle = meterGrad; mvCtx.fillRect(meterX, meterY + meterH - activeHeight, 10, activeHeight);
+            }
+
+            mvCtx.fillStyle = 'rgba(0, 0, 0, 0.85)'; mvCtx.fillRect(x + 8, y + kh - 26, kw - 16, 20);
+            const tallyColor = isProgramLive ? '#ef4444' : isPreviewPreset ? '#22c55e' : '#64748b';
+            mvCtx.fillStyle = tallyColor; mvCtx.beginPath(); mvCtx.arc(x + 18, y + kh - 16, 4, 0, Math.PI * 2); mvCtx.fill();
+            mvCtx.fillStyle = isProgramLive ? '#fca5a5' : isPreviewPreset ? '#86efac' : '#ffffff';
+            mvCtx.font = 'bold 12px monospace'; mvCtx.textAlign = 'left'; mvCtx.fillText(slot.label, x + 28, y + kh - 12);
+        });
+
+        mvTexture.needsUpdate = true;
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        frameCounter++;
+        if (frameCounter % 3 === 0) { renderCamViewfinder('cam1'); } 
+        else if (frameCounter % 3 === 1) { renderCamViewfinder('cam2'); } 
+        else { renderCamViewfinder('cam3'); }
+        if (frameCounter % 2 === 0) { renderMultiviewWall(); }
+
+        if (STATE.isAnimatingCam) {
+            STATE.animProgress += 0.02;
+            if (STATE.animProgress >= 1.0) { STATE.animProgress = 1.0; STATE.isAnimatingCam = false; }
+            const t = easeInOutCubic(STATE.animProgress);
+            camera.position.lerpVectors(STATE.camStartPos, STATE.camEndPos, t);
+            controls.target.lerpVectors(STATE.targetStartPos, STATE.targetEndPos, t);
+        }
+
+        controls.update(); renderer.render(scene, camera);
+    }
+    animate();
+</script>
+</body>
+</html>
