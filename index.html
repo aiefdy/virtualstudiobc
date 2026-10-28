@@ -1627,8 +1627,15 @@
     window.resetCamera = function() { flyToZone('default'); };
 
     function startCameraAnimation(newCamPos, newTargetPos) {
-        STATE.isAnimatingCam = true; STATE.animProgress = 0; STATE.camStartPos.copy(camera.position); STATE.camEndPos.copy(newCamPos);
-        STATE.targetStartPos.copy(controls.target); STATE.targetEndPos.copy(newTargetPos); controls.enabled = true;
+        STATE.isAnimatingCam = true; 
+        STATE.animProgress = 0; 
+        STATE.camStartPos.copy(camera.position); 
+        STATE.camEndPos.copy(newCamPos);
+        STATE.targetStartPos.copy(controls.target); 
+        STATE.targetEndPos.copy(newTargetPos); 
+        
+        // Kunci kontrol sentuh saat kamera sedang terbang otomatis agar tidak tabrakan
+        controls.enabled = false; 
     }
 
     function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
@@ -1776,8 +1783,15 @@
         if (frameCounter % 12 === 6) { renderMultiviewWall(); }
 
         if (STATE.isAnimatingCam) {
-            STATE.animProgress += 0.02;
-            if (STATE.animProgress >= 1.0) { STATE.animProgress = 1.0; STATE.isAnimatingCam = false; }
+            // Naikkan kecepatan transisi animasi agar lebih gesit dan responsif di HP
+            STATE.animProgress += 0.04; 
+            if (STATE.animProgress >= 1.0) { 
+                STATE.animProgress = 1.0; 
+                STATE.isAnimatingCam = false; 
+                
+                // Lepas kembali kunci kontrol setelah kamera sampai di tujuan
+                controls.enabled = true; 
+            }
             const t = easeInOutCubic(STATE.animProgress);
             camera.position.lerpVectors(STATE.camStartPos, STATE.camEndPos, t);
             controls.target.lerpVectors(STATE.targetStartPos, STATE.targetEndPos, t);
