@@ -738,7 +738,9 @@
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
+    controls.dampingFactor = 0.08; // Ditingkatkan agar usapan jari terasa lebih responsif dan tidak terlalu berat
+    controls.rotateSpeed = 1.2; // Mempercepat putaran kamera di layar sentuh
+    controls.panSpeed = 1.2;
     controls.maxPolarAngle = Math.PI / 2 - 0.05;
     controls.minDistance = 1;
     controls.maxDistance = 20;
@@ -1764,10 +1766,14 @@
     function animate() {
         requestAnimationFrame(animate);
         frameCounter++;
-        if (frameCounter % 3 === 0) { renderCamViewfinder('cam1'); } 
-        else if (frameCounter % 3 === 1) { renderCamViewfinder('cam2'); } 
-        else { renderCamViewfinder('cam3'); }
-        if (frameCounter % 2 === 0) { renderMultiviewWall(); }
+        
+        // Throttling Render Pass: Meringankan beban GPU HP/Mobile agar pergerakan kamera tidak lag/slow.
+        // Viewfinder dan Multiview hanya dirender bergantian setiap beberapa frame, bukan setiap frame.
+        if (frameCounter % 12 === 0) { renderCamViewfinder('cam1'); } 
+        else if (frameCounter % 12 === 4) { renderCamViewfinder('cam2'); } 
+        else if (frameCounter % 12 === 8) { renderCamViewfinder('cam3'); }
+        
+        if (frameCounter % 12 === 6) { renderMultiviewWall(); }
 
         if (STATE.isAnimatingCam) {
             STATE.animProgress += 0.02;
