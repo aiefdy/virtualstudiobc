@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Virtual Broadcast Studio Simulator - SMK Budi Luhur</title>
     <script src="https://cdn.tailwindcss.com"></script>
     
@@ -17,7 +17,7 @@
 
     <style>
         body { margin: 0; overflow: hidden; background-color: #0f172a; font-family: 'Inter', sans-serif; }
-        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; touch-action: none; }
         
         /* UI Layer */
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; display: flex; flex-direction: column; justify-content: space-between; }
@@ -1487,10 +1487,28 @@
     // ==========================================
     const raycaster = new THREE.Raycaster(); const mouse = new THREE.Vector2(); const tooltip = document.getElementById('hover-tooltip');
     let pointerDownPos = new THREE.Vector2();
-    window.addEventListener('pointerdown', (e) => { pointerDownPos.set(e.clientX, e.clientY); });
+    let isDragging = false;
+
+    window.addEventListener('pointerdown', (e) => { 
+        if (e.target.tagName === 'CANVAS') {
+            pointerDownPos.set(e.clientX, e.clientY); 
+            isDragging = false;
+        }
+    });
+    
     function setHighlight(object, isActive) {}
 
     window.addEventListener('pointermove', (e) => {
+        if (e.target.tagName === 'CANVAS') {
+            if (Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y) > 5) {
+                isDragging = true;
+            }
+        }
+
+        // Hanya tampilkan hover tooltip untuk mouse. 
+        // Hindari tooltip nyangkut/tersisa di layar sentuh (HP/Tablet).
+        if (e.pointerType !== 'mouse') return;
+
         if (e.target.tagName !== 'CANVAS') {
             if (STATE.hoveredObject) { setHighlight(STATE.hoveredObject, false); STATE.hoveredObject = null; document.body.style.cursor = 'default'; tooltip.style.display = 'none'; }
             return;
@@ -1513,14 +1531,33 @@
         }
     });
 
-    window.addEventListener('click', (e) => {
+    window.addEventListener('pointerup', (e) => {
         if (e.target.tagName !== 'CANVAS') return;
-        const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y); if (dist > 5) return;
-        if (STATE.hoveredObject) {
-            const id = STATE.hoveredObject.userData.id; const eqData = EQUIPMENT_REGISTRY[id];
+        if (isDragging) return; // Batal eksekusi (TIDAK MEMILIH ALAT) jika pengguna hanya sedang menggeser/pan/orbit kamera
+        
+        mouse.x = (e.clientX / window.innerWidth) * 2 - 1; mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(INTERACTIVE_OBJECTS, false);
+        
+        let hitObject = null;
+        if (intersects.length > 0) {
+            hitObject = intersects[0].object;
+        }
+
+        if (hitObject) {
+            const id = hitObject.userData.id; 
+            const eqData = EQUIPMENT_REGISTRY[id];
+            
             if(eqData) {
-                STATE.selectedObject = STATE.hoveredObject; showInspector(id, eqData);
-                const objGroup = STATE.hoveredObject.parent; const box = new THREE.Box3().setFromObject(objGroup); const targetPos = new THREE.Vector3(); box.getCenter(targetPos);
+                STATE.selectedObject = hitObject; 
+                showInspector(id, eqData);
+                
+                // Pastikan tooltip disembunyikan saat tap di HP
+                if (e.pointerType !== 'mouse') {
+                    tooltip.style.display = 'none';
+                }
+
+                const objGroup = hitObject.parent; const box = new THREE.Box3().setFromObject(objGroup); const targetPos = new THREE.Vector3(); box.getCenter(targetPos);
                 
                 const customViews = {
                     'cam1': { cam: new THREE.Vector3(0, 1.36, -3.15), target: new THREE.Vector3(0, 1.25, 0.0) },
